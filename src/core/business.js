@@ -8,6 +8,7 @@
   else root.TsukinowaCoreBusiness=api;
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
+const Numbering=typeof module==='object'&&module.exports?require('./document-numbering'):globalThis.TsukinowaDocumentNumbers;
 const COLLECTIONS=Object.freeze(['settings','customers','projects','schedule','documents','sales','payments','expenses','cashLedger','bankTransactions','suppliers','supplierTransactions','auditLogs']);
 const TYPES=Object.freeze(['estimate','invoice','receipt','onoda']);
 const clone=x=>JSON.parse(JSON.stringify(x));
@@ -70,7 +71,14 @@ function issue(s,x){
  if(!amount)throw Error('帳票金額は正数です');
  const sourceKey=x.sourceKey?text(x.sourceKey,'帳票参照'):'';
  const existing=sourceKey?rows(s,'documents').find(d=>active(d)&&d.sourceKey===sourceKey&&d.docType===docType):null;
- if(existing){if(existing.amount!==amount||JSON.stringify(existing.snapshot)!==JSON.stringify(snapshot))throw Error('発行済帳票の修正は訂正版を作成してください');return {document:existing,saleId:existing.saleId,paymentId:existing.paymentId,reused:true};}
+ if(existing){
+  const originalSnapshot=clone(existing.snapshot),requested=clone(snapshot);
+  delete originalSnapshot.invoiceNo;delete requested.invoiceNo;
+  if(existing.amount!==amount||JSON.stringify(originalSnapshot)!==JSON.stringify(requested))throw Error('発行済帳票の修正は訂正版を作成してください');
+  return {document:existing,saleId:existing.saleId,paymentId:existing.paymentId,reused:true};
+ }
+ if(snapshot.invoiceNo)throw Error('新規帳票の正式番号はシステムが採番します');
+ snapshot.invoiceNo=Numbering.reserve(rows(s,'documents'),x.issuedAt||new Date());
  let sale=null,pay=null;
  if(docType==='invoice'||docType==='onoda'){
   const source=x.scheduleId?'schedule:'+x.scheduleId:sourceKey?'invoice:'+sourceKey:'document:'+String(s.seq+1);
@@ -90,7 +98,7 @@ function issue(s,x){
    pay=payment(s,{saleId:sale.id,amount,method:text(snapshot.paymentMethod,'入金方法'),paymentDate:issueDate,sourceDocumentId:sourceKey||'receipt:'+String(s.seq+1)});
   }
  }
- const doc=write(s,'documents',{id:idFor(s,'doc'),docType,sourceKey,customer,issueDate,amount,snapshot,items,saleId:sale?.id||'',paymentId:pay?.id||'',scheduleId:x.scheduleId||'',status:'active',revisionOf:''});
+ const doc=write(s,'documents',{id:idFor(s,'doc'),docType,sourceKey,invoiceNo:snapshot.invoiceNo,customer,issueDate,amount,snapshot,items,saleId:sale?.id||'',paymentId:pay?.id||'',scheduleId:x.scheduleId||'',status:'active',revisionOf:''});
  if(sale&&!sale.documentId)sale.documentId=doc.id;
  if(pay&&!pay.sourceDocumentId)pay.sourceDocumentId=doc.id;
  return {document:doc,saleId:sale?.id||'',paymentId:pay?.id||'',reused:false};
@@ -121,7 +129,8 @@ function operate(s,cmd){
   const original=requireRow(s,'documents',c.documentId),reason=text(c.reason,'訂正理由');
   if(original.status!=='active')throw Error('有効な原本だけを訂正できます');
   if(c.newSnapshot?.docType&&c.newSnapshot.docType!==original.docType)throw Error('帳票種類を変更できません');
-  const snap=clone(c.newSnapshot||{}),amount=original.docType==='receipt'?yen(snap.receiptTotal):yen(c.amount);
+  const snap=clone(c.newSnapshot||{});delete snap.invoiceNo;
+  const amount=original.docType==='receipt'?yen(snap.receiptTotal):yen(c.amount);
   if(!amount)throw Error('訂正金額が不正です');
   const customer=text(snap.customerName,'宛名'),newDate=date(snap.invoiceDate,'発行日');
   if(original.saleId){
@@ -140,8 +149,9 @@ function operate(s,cmd){
    }
    sale.customer=customer;
   }
+  snap.invoiceNo=Numbering.reserve(rows(s,'documents'),c.issuedAt||new Date());
   original.status='revised';original.revisedReason=reason;
-  const revised=write(s,'documents',{id:idFor(s,'doc'),docType:original.docType,sourceKey:'revision:'+original.id,customer,issueDate:newDate,amount,snapshot:snap,items:clone(snap.items||[]),saleId:original.saleId,paymentId:original.paymentId,scheduleId:original.scheduleId,status:'active',revisionOf:original.id});
+  const revised=write(s,'documents',{id:idFor(s,'doc'),docType:original.docType,sourceKey:'revision:'+original.id,invoiceNo:snap.invoiceNo,customer,issueDate:newDate,amount,snapshot:snap,items:clone(snap.items||[]),saleId:original.saleId,paymentId:original.paymentId,scheduleId:original.scheduleId,status:'active',revisionOf:original.id});
   original.revisedTo=revised.id;
   if(original.saleId){const sale=requireRow(s,'sales',original.saleId);sale.documentId=revised.id;}
   if(original.paymentId){const pay=requireRow(s,'payments',original.paymentId);pay.sourceDocumentId=revised.sourceKey;}
