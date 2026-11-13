@@ -74,3 +74,13 @@ test('reconciling external provider records cannot mutate official or bank sourc
  const data=Object.freeze({...stripe(),official:Object.freeze({...stripe().official}),bankPayouts:Object.freeze([Object.freeze({...stripe().bankPayouts[0]})])});
  const original=JSON.stringify(data);reconcileMonth(data);assert.equal(JSON.stringify(data),original);
 });
+
+test('a repeated bank row ID must not double-count a single monthly payout',()=>{
+ const x=stripe();x.bankPayouts.push({...x.bankPayouts[0]});
+ assert.throws(()=>reconcileMonth(x),/二重/);
+});
+test('platform verification never imports the accounting engine, Firebase or calendar',()=>{
+ const source=require('node:fs').readFileSync(require.resolve('../src/integrations/platform-settlement'),'utf8');
+ assert(!/\brequire\s*\(/.test(source),'internal monthly audit must remain dependency-free');
+ assert(!/firebase|firestore|localStorage|setDoc|saveExpense|registerPayment|registerSale/.test(source));
+});
