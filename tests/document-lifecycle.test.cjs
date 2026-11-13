@@ -82,3 +82,35 @@ test('partial customer update does not silently erase saved address',()=>{
  state=exec(state,'update-customer',{type:'saveCustomer',id,name:'名称訂正'});
  assert.equal(B.list(state,'customers')[0].address,'東京都板橋区');
 });
+
+test('void cannot cancel a revised original and void its currently active correction sale',()=>{
+ let s=B.emptyState();s=exec(s,'invoice',invoice());
+ const d=B.list(s,'documents')[0];
+ s=exec(s,'revision',{type:'reviseDocument',documentId:d.id,reason:'宛名訂正',amount:11000,newSnapshot:{...d.snapshot,customerName:'訂正後'}});
+ const before=JSON.stringify(s);
+ assert.throws(()=>B.perform(s,{operationId:'bad-void',type:'voidDocument',documentId:d.id,reason:'重複'}),/有効な帳票/);
+ assert.equal(JSON.stringify(s),before);
+ assert.equal(B.list(s,'sales')[0].status,'active');
+ assert.equal(B.list(s,'documents').filter(x=>x.status==='active').length,1);
+});
+test('void cannot invalidate one active document if another active document shares same sale',()=>{
+ let s=B.emptyState();s=exec(s,'invoice',invoice());
+ const first=B.list(s,'documents')[0];
+ s=exec(s,'onoda',{type:'issueDocument',docType:'onoda',scheduleId:'dummy',sourceKey:'other',amount:11000,snapshot:{customerName:'原本顧客',invoiceDate:'2026-11-13',items:[{content:'施工',qty:1,price:10000}]}});
+ const second=B.list(s,'documents')[1];
+ // A second document may share a sale through its explicit schedule source;
+ // set the source in the synthetic state to exercise the void invariant.
+ const linked=structuredClone(s);
+ linked.collections.documents[second.id].saleId=first.saleId;
+ const before=JSON.stringify(linked);
+ assert.throws(()=>B.perform(linked,{type:'voidDocument',operationId:'void-shared',documentId:first.id,reason:'重複'}),/別の有効帳票/);
+ assert.equal(JSON.stringify(linked),before);
+});
+test('canceled schedule cannot be silently restored with saveSchedule',()=>{
+ let s=B.emptyState();s=exec(s,'new-ev',{type:'saveSchedule',date:'2026-11-16',title:'工事'});
+ const id=B.list(s,'schedule')[0].id;
+ s=exec(s,'cancel-ev',{type:'voidRecord',collection:'schedule',id,reason:'取消'});
+ const before=JSON.stringify(s);
+ assert.throws(()=>B.perform(s,{type:'saveSchedule',operationId:'reopen',id,date:'2026-11-16',title:'工事'}),/復活できません/);
+ assert.equal(JSON.stringify(s),before);
+});
