@@ -77,7 +77,8 @@ service cloud.firestore {
      && request.resource.data.targets is list
      && request.resource.data.targets.size()>=1 && request.resource.data.targets.size()<=10
      && request.resource.data.signature is string
-     && (!('requestHash' in request.resource.data) || (request.resource.data.requestHash is string && request.resource.data.requestHash.matches('^[0-9a-f]{64}
+     && (!('requestHash' in request.resource.data) || (request.resource.data.requestHash is string && request.resource.data.requestHash.size() == 64))
+     && request.resource.data.action is string;
    allow update,delete: if false;
   }
   match /companies/{company}/documentNumbers/{number} {
