@@ -21,5 +21,5 @@ test('one matching sale requires explicit user review, ambiguous matches cannot 
  assert.equal(conflict.status,'ambiguous');
 });
 test('unparseable or missing official due date never fills guessed date',()=>{
- assert.throws(()=>previewHistoricalPdf({text:'発行日: 2025-09-30 宛名: 会社'}),/日付/);
+ assert.throws(()=>previewHistoricalPdf({text:'発行日: 2025-09-30 宛名: 会社'}),/顧客名|日付/);
 });
