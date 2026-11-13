@@ -8,6 +8,12 @@ const META_ID='_domain_metadata';
 const COLLECTIONS=Domain.COLLECTIONS.filter(k=>k!=='auditLogs');
 const clone=x=>JSON.parse(JSON.stringify(x));
 const json=x=>JSON.stringify(x);
+async function requestHash(command){
+ const bytes=new TextEncoder().encode(JSON.stringify(command));
+ if(!globalThis.crypto?.subtle)throw Error('Secure SHA-256 not available for operation verification');
+ const digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);
+ return Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
+}
 function createCommandService({repository,maximumChanges=6}={}){
  if(!repository||!['list','read','apply','readOperation'].every(k=>typeof repository[k]==='function'))throw Error('Transactional Firestore repository required');
  if(!Number.isInteger(maximumChanges)||maximumChanges<2||maximumChanges>8)throw Error('Invalid maximum changes');
@@ -34,9 +40,11 @@ function createCommandService({repository,maximumChanges=6}={}){
   if(command.type==='deleteTestRecord')throw Error('テスト削除はテスト領域のみで利用可能です');
   if(!command.operationId||!command.type)throw Error('操作IDと種類が必要です');
   if(command.type==='saveSettings'&&command.key===META_ID)throw Error('予約済み設定キーです');
+  const fingerprint=await requestHash(command);
   const previous=await repository.readOperation(command.operationId);
   if(previous){
-   if(previous.action!==command.type)throw Error('同一操作IDを異なる操作に利用できません');
+   const actor=await repository.identity();
+   if(previous.action!==command.type||previous.requestHash!==fingerprint||previous.actorId!==actor.uid)throw Error('同一操作IDの依頼内容が一致しません');
    return {reused:true,targets:previous.targets,operationId:command.operationId};
   }
   const {state,revision,snapshots}=await load();
@@ -59,13 +67,17 @@ function createCommandService({repository,maximumChanges=6}={}){
   if(changed.length>maximumChanges)throw Error('多件数の操作は業務単位で分割し、個別照合してください');
   // All changed business records, audit logs, and domain meta commit atomically.
   try{
-   const commit=await repository.apply({operationId:command.operationId,action:command.type,changes:changed});
+   const commit=await repository.apply({operationId:command.operationId,action:command.type,changes:changed,requestHash:fingerprint});
    return {...commit,result:clone(result.result),changes:changed.length};
   }catch(e){
    // If another client succeeded with identical operationId, only return the
    // immutable marker; never repeat accounting or allocate a second number.
    const committed=await repository.readOperation(command.operationId);
-   if(committed&&committed.action===command.type)return {reused:true,targets:committed.targets,operationId:command.operationId};
+   if(committed){
+    const actor=await repository.identity();
+    if(committed.action!==command.type||committed.requestHash!==fingerprint||committed.actorId!==actor.uid)throw Error('同一操作IDの依頼内容が一致しません');
+    return {reused:true,targets:committed.targets,operationId:command.operationId};
+   }
    throw e;
   }
  }
