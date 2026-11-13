@@ -58,6 +58,13 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
     return {operationId,reused:true,targets:prev.targets};
    }
    const old=[];
+   const numberClaims=changes.filter(c=>c.collection==='documents'&&c.expectedRevision===0);
+   for(const c of numberClaims){
+    const no=c.payload.invoiceNo;
+    if(!/^\d{8}-\d{4}-\d{2,}$/.test(String(no||''))||c.payload.snapshot?.invoiceNo!==no)throw Error('正式帳票番号とsnapshotが一致しません');
+    const reservation=await tx.get(sdk.doc(db,base+'/documentNumbers/'+no));
+    if(reservation.exists())throw Error('帳票番号の競合: '+no);
+   }
    for(const c of changes){const snap=await tx.get(sdk.doc(db,path(c.collection,c.id)));old.push(snap.exists()?snap.data():null);}
    for(let i=0;i<changes.length;i++){
     const c=changes[i],previous=old[i];
@@ -72,6 +79,7 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
     tx.set(sdk.doc(db,path(c.collection,c.id)),envelope);
     tx.set(sdk.doc(db,path('auditLogs',auditId)),{operationId,userId:user.uid,companyId,entityType:c.collection,entityId:c.id,action,before:previous?.payload||null,after:structuredClone(c.payload),timestamp:now});
    }
+   for(const c of numberClaims){tx.set(sdk.doc(db,base+'/documentNumbers/'+c.payload.invoiceNo),{invoiceNo:c.payload.invoiceNo,operationId,actorId:user.uid,companyId,documentId:c.id,createdAt:now});}
    tx.set(sdk.doc(db,operationPath),{operationId,action,actorId:user.uid,companyId,targets,signature,createdAt:now});
    return {operationId,reused:false,targets};
   });
