@@ -86,6 +86,11 @@ function issue(s,x){
   const source=x.scheduleId?'schedule:'+x.scheduleId:sourceKey?'invoice:'+sourceKey:'document:'+String(s.seq+1);
   sale=registerSale(s,source,{customer,amount,salesDate:x.salesDate||issueDate,invoiceDate:issueDate,description:items.map(i=>i.content).join(' / '),scheduleId:x.scheduleId||''});
   if(sale.amount!==amount)throw Error('関連売上の金額が一致しません');
+  if(x.scheduleId){const ev=row(s,'schedule',x.scheduleId);if(ev){
+   if(!active(ev))throw Error('取消済みの工事予定に請求書を関連付けられません');
+   if(ev.registeredSaleId&&ev.registeredSaleId!==sale.id)throw Error('同じ工事日程に別の売上が登録されています');
+   ev.registeredSaleId=sale.id;
+  }}
  }
  if(docType==='receipt'){
   if(x.saleId){sale=requireRow(s,'sales',x.saleId);}
@@ -182,7 +187,7 @@ function operate(s,cmd){
   const originalAmount=yen(estimate.amount);
   a=issue(s,{docType:'invoice',snapshot:snap,amount:originalAmount,
    sourceKey:'converted-estimate:'+estimate.id,
-   scheduleId:c.scheduleId||estimate.scheduleId||'',salesDate:c.salesDate||snap.invoiceDate,issuedAt:c.issuedAt});
+   scheduleId:c.scheduleId||estimate.acceptedScheduleId||estimate.scheduleId||'',salesDate:c.salesDate||snap.invoiceDate,issuedAt:c.issuedAt});
   a.document.estimateId=estimate.id;
   estimate.convertedInvoiceId=a.document.id;
   break;
