@@ -55,3 +55,30 @@ test('voiding invoice with pending payment requires settling payment first',()=>
  s=exec(s,'p',{type:'registerPayment',saleId:d.saleId,amount:1000,method:'銀行振込',paymentDate:'2026-11-13'});
  assert.throws(()=>B.perform(s,{operationId:'void',type:'voidDocument',documentId:d.id,reason:'取消'}),/入金/);
 });
+
+test('reissued original reference after revision is forbidden; no second sale or document',()=>{
+ let state=B.emptyState();
+ state=exec(state,'issue1',invoice());
+ const old=B.list(state,'documents')[0];
+ state=exec(state,'revision1',{type:'reviseDocument',documentId:old.id,reason:'宛名訂正',amount:11000,newSnapshot:{...old.snapshot,customerName:'修正名'}});
+ const before=JSON.stringify(state);
+ assert.throws(()=>B.perform(state,{...invoice(),operationId:'issue2'}),/元参照は再発行できません/);
+ assert.equal(JSON.stringify(state),before);
+ assert.equal(B.list(state,'sales').length,1);
+ assert.equal(B.list(state,'documents').length,2);
+});
+test('reissued cancelled original source never creates another numbered document',()=>{
+ let state=B.emptyState();
+ state=exec(state,'issue1',invoice());
+ const old=B.list(state,'documents')[0];
+ state=exec(state,'void1',{type:'voidDocument',documentId:old.id,reason:'発行取消'});
+ assert.throws(()=>B.perform(state,{...invoice(),operationId:'again'}),/元参照は再発行できません/);
+ assert.equal(B.list(state,'sales').length,1);
+});
+test('partial customer update does not silently erase saved address',()=>{
+ let state=B.emptyState();
+ state=exec(state,'first-customer',{type:'saveCustomer',name:'既存顧客',address:'東京都板橋区'});
+ const id=B.list(state,'customers')[0].id;
+ state=exec(state,'update-customer',{type:'saveCustomer',id,name:'名称訂正'});
+ assert.equal(B.list(state,'customers')[0].address,'東京都板橋区');
+});
