@@ -37,8 +37,9 @@ function verifyShadow(dump,{requireFullExport=true}={}){
   if(missing.length)throw Error('Legacy export is incomplete: '+missing.join(', '));
  }
  const inventory=C.validateLegacyDump(dump,{strictCollections:true,strictLinks:true});
- if(inventory.issues.length){
-  const kinds=[...new Set(inventory.issues.map(x=>x.code))];
+ const integrityFailures=inventory.issues.filter(x=>x.code!=='missing-new-domain');
+ if(integrityFailures.length){
+  const kinds=[...new Set(integrityFailures.map(x=>x.code))];
   throw Error('Legacy data audit blocked: '+kinds.join(', '));
  }
  const collections={};
@@ -55,8 +56,8 @@ function verifyShadow(dump,{requireFullExport=true}={}){
 }
 function createShadow(dump,{requireFullExport=false}={}){
  const {collections,inventory}=verifyShadow(dump,{requireFullExport});
- const get=(name,id)=>collections[name]?.get(String(id||''))?.payload||null;
- const rows=name=>[...(collections[name]?.values()||[])].map(x=>clone(x.payload));
+ const get=(name,id)=>{const value=collections[name]?.get(String(id||''));return value?{...clone(value.payload),id:value.id}:null;};
+ const rows=name=>[...(collections[name]?.values()||[])].map(x=>({...clone(x.payload),id:x.id}));
  const oldDocument=id=>get('documents',id);
  const oldSale=id=>get(String(id).startsWith('receivable_')?'receivables':'sales',id);
  const paymentsFor=id=>rows('payments').filter(p=>p.saleId===id&&isActive(p));
@@ -108,7 +109,7 @@ function createShadow(dump,{requireFullExport=false}={}){
    totals:{anchors:ledger.length,amount:ledger.reduce((n,x)=>n+x.amount,0),
     collected:ledger.reduce((n,x)=>n+x.confirmedPaid,0),
     outstanding:ledger.reduce((n,x)=>n+x.outstanding,0)},
-   canPromote:orphanPayments.length===0&&orphanDocuments.length===0&&orphanCalendar.length===0};
+   canPromote:false, // a historical read-only shadow never authorizes migration
  }
  return {readonly:true,inventory,rows,get,oldDocument,oldSale,paymentsFor,receivableRows,calendarRows,estimatesRows,reconcile};
 }
