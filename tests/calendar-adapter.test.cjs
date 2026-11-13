@@ -91,6 +91,6 @@ test('remote day change for booked construction schedule is retained as review, 
  assert.equal(res.summary.skipped,1);
  assert.equal(B.list(res.state,'schedule')[0].date,'2026-11-16');
  assert.equal(JSON.stringify(B.list(res.state,'sales')),first);
- assert.equal(res.state.calendarConflicts.length,1);
- assert.equal(res.state.calendarConflicts[0].incomingDate,'2026-11-19');
+ assert.equal(res.reviews.length,1);
+ assert.equal(res.reviews[0].incomingDate,'2026-11-19');
 });
