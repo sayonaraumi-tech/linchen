@@ -102,6 +102,12 @@ let serial=0;
 function operationId(){serial++;return 'browser_'+Date.now().toString(36)+'_'+serial+'_'+Math.random().toString(36).slice(2,12)}
 function val(data,key){return String(data.get(key)??'').trim()}
 async function submit(form){
+ if(form.dataset.submitting==='true')return;
+ form.dataset.submitting='true';
+ if(!form.dataset.operationId)form.dataset.operationId=operationId();
+ const submitButton=form.querySelector('button[type=submit]');
+ if(submitButton)submitButton.disabled=true;
+ try{
  const data=new FormData(form),action=form.dataset.action;
  let command;
  switch(action){
@@ -110,7 +116,7 @@ async function submit(form){
   const type=val(data,'docType'),amountValue=Number(val(data,'amount'));
   const customer=val(data,'customerName'),date=val(data,'invoiceDate'),description=val(data,'description');
   const gross=type==='receipt'?amountValue:amountValue+Math.round(amountValue*0.1);
-  command={type:'issueDocument',docType:type,sourceKey:'test_'+operationId(),amount:gross,
+  command={type:'issueDocument',docType:type,sourceKey:'test_'+(form.dataset.operationId||operationId()),amount:gross,
    snapshot:{customerName:customer,invoiceDate:date,items:[{content:description,qty:1,price:amountValue,taxable:true,unit:'式'}],
     receiptTotal:amountValue,paymentMethod:val(data,'paymentMethod'),tadashi:description,carryoverAmount:0}};
   break;
@@ -122,9 +128,13 @@ async function submit(form){
  case 'customer':command={type:'saveCustomer',name:val(data,'name'),address:val(data,'address')};break;
  default:throw Error('Unsupported form action');
  }
- await store.perform({...command,operationId:operationId()});
+ await store.perform({...command,operationId:form.dataset.operationId});
  notice('テスト領域に保存しました：'+action);
  render(current);
+ }finally{
+  form.dataset.submitting='false';
+  if(submitButton)submitButton.disabled=false;
+ }
 }
 async function clickAction(btn){
  const action=btn.dataset.action,id=btn.dataset.id;
