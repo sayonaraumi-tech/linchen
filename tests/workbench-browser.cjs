@@ -120,6 +120,8 @@ test('bank matching is explicit and never creates a duplicate sale',async()=>{
   await app.page.getByRole('button',{name:'銀行明細のテスト登録'}).click();
   app.page.on('dialog',d=>d.accept());
   await app.page.getByRole('button',{name:'候補を確認'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('銀行照合を確定しました')||document.querySelector('#status')?.dataset.error==='true');
+  assert.match(await app.page.locator('#status').innerText(),/銀行照合を確定しました/);
   const data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
   assert.equal(Object.keys(data.collections.sales).length,1);
   assert.equal(Object.values(data.collections.payments)[0].confirmation,'bank-confirmed');
