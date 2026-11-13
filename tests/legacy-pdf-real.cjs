@@ -48,8 +48,8 @@ async function runOne(browser,endpoint,group,width,test){
  const errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  page.on('dialog',d=>d.dismiss());
- await page.route('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',route=>route.fulfill({path:bundle,contentType:'application/javascript'}));
  await page.route('https://**/*',route=>route.abort());
+ await page.route('https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js',route=>route.fulfill({path:bundle,contentType:'application/javascript'}));
  await page.goto(endpoint,{waitUntil:'load'});
  const meta=await page.evaluate(x=>{
   const items=Array.from({length:x.rows},(_,i)=>({content:'壁紙張替 '+(i+1),qty:1,price:1000,taxable:true,unit:'式'}));
@@ -62,7 +62,7 @@ async function runOne(browser,endpoint,group,width,test){
  assert.equal(meta.rowCount,test.rows,group+' '+test.name+' rows mismatch');
  if(test.type==='onoda')assert.equal(meta.mode,test.rows<=16?'normal-16':'multipage',group+' '+test.name+' mode');
  const pdfPath=path.join(out,group+'-'+test.name+'-'+width+'.pdf');
- const downloadPromise=page.waitForEvent('download',{timeout:90000});
+ const downloadPromise=page.waitForEvent('download',{timeout:15000});
  await page.evaluate(()=>doPrint());
  const download=await downloadPromise;
  await download.saveAs(pdfPath);
@@ -77,7 +77,7 @@ async function runOne(browser,endpoint,group,width,test){
  let failed=false;const report=[];
  try{
   for(const width of [1280,390])for(const test of types){
-   const row={case:test.name,width};
+   const row={case:test.name,width};console.log('BEGIN',test.name,width);
    try{
     row.old=await runOne(browser,old.url,'old',width,test);
     row.new=await runOne(browser,fresh.url,'new',width,test);
