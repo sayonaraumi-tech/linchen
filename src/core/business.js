@@ -280,7 +280,7 @@ function operate(s,cmd){
  case 'voidRecord':{
   if(!['documents','sales','payments','expenses','schedule','projects','customers'].includes(c.collection))throw Error('取消対象外です');
   const target=requireRow(s,c.collection,c.id);text(c.reason,'取消理由');
-  if(c.collection==='sales'&&totalPayments(s,target.id)>0)throw Error('入金がある売上は先に入金を整理してください');
+  if(c.collection==='sales'&&rows(s,'payments').some(p=>active(p)&&p.saleId===target.id))throw Error('登録済入金がある売上は未確認分を含め先に整理してください');
   if(c.collection==='payments'&&target.bankTxnId)throw Error('銀行照合を先に解除してください');
   if(c.collection==='expenses'&&target.bankTxnId)throw Error('銀行照合済支出は照合解除してから取消してください');
   if(c.collection==='customers'&&(
@@ -316,9 +316,9 @@ function operate(s,cmd){
   const related={suppliers:()=>rows(s,'supplierTransactions').some(p=>active(p)&&p.supplierId===target.id),
     supplierTransactions:()=>rows(s,'expenses').some(p=>active(p)&&p.supplierTransactionId===target.id)||rows(s,'cashLedger').some(p=>active(p)&&p.sourceId===target.id)||!!target.bankTxnId,
     sales:()=>rows(s,'payments').some(p=>active(p)&&p.saleId===target.id),
-    payments:()=>rows(s,'cashLedger').some(p=>active(p)&&p.sourceId===target.id),
+    payments:()=>rows(s,'cashLedger').some(p=>active(p)&&p.sourceId===target.id)||rows(s,'documents').some(d=>d.paymentId===target.id),
     expenses:()=>rows(s,'cashLedger').some(p=>active(p)&&p.sourceId===target.id),
-    documents:()=>rows(s,'sales').some(p=>active(p)&&p.documentId===target.id)||rows(s,'payments').some(p=>active(p)&&p.sourceDocumentId===target.sourceKey),
+    documents:()=>rows(s,'sales').some(p=>active(p)&&p.documentId===target.id)||rows(s,'payments').some(p=>active(p)&&p.sourceDocumentId===target.sourceKey)||rows(s,'documents').some(d=>d.id!==target.id&&(d.estimateId===target.id||d.linkedInvoiceId===target.id||d.revisionOf===target.id)),
     projects:()=>rows(s,'schedule').some(p=>active(p)&&p.projectId===target.id),
     customers:()=>rows(s,'projects').some(p=>active(p)&&p.customer===target.name),
     schedule:()=>rows(s,'sales').some(p=>active(p)&&p.scheduleId===target.id),
@@ -331,9 +331,13 @@ function operate(s,cmd){
 }
 function perform(state,command){
  assertState(state);const c=clone(command||{});const operationId=text(c.operationId,'操作ID');
- if(state.operationIds[operationId])return {state:clone(state),result:clone(state.operationIds[operationId].result),reused:true};
+ if(state.operationIds[operationId]){
+  const previous=state.operationIds[operationId];
+  if(previous.type!==c.type||previous.command&&JSON.stringify(previous.command)!==JSON.stringify(c))throw Error('同じ操作IDで異なる内容を保存できません');
+  return {state:clone(state),result:clone(previous.result),reused:true};
+ }
  const candidate=clone(state);const result=operate(candidate,c);
- candidate.operationIds[operationId]={result:clone(result),type:c.type};
+ candidate.operationIds[operationId]={result:clone(result),type:c.type,command:clone(c)};
  write(candidate,'auditLogs',{id:idFor(candidate,'audit'),operationId,action:c.type,targetId:result?.id||result?.document?.id||result?.payment?.id||result?.deletedId||'',scope:candidate.scope});
  return {state:candidate,result:clone(result),reused:false};
 }
