@@ -4,11 +4,11 @@ Generated from the *pinned original* geruninn source command branches vs new ind
 
 | Original command | Original module(s) | New command / adapter | Status |
 |---|---|---|---|
-| `acceptEstimate` | business-domain.js | No equivalent | Missing or partial |
+| `acceptEstimate` | business-domain.js | `acceptEstimate` | Implemented, targeted regression; original parity ongoing
 | `accountingMigrationComplete` | accounting-domain.js | No equivalent | Missing or partial |
 | `archiveDocument` | business-domain.js | history archive pending | Missing or partial |
 | `backfillCash` | accounting-domain.js | No equivalent | Missing or partial |
-| `bankExclude` | accounting-domain.js | No equivalent | Missing or partial |
+| `bankExclude` | accounting-domain.js | `bankExclude` | Implemented, targeted regression; original parity ongoing
 | `bankMatch` | accounting-domain.js | matchBankPayment / matchBankExpense | Missing or partial |
 | `bankRestoreDuplicate` | accounting-domain.js | No equivalent | Missing or partial |
 | `bankUnmatch` | accounting-domain.js | unmatchBank | Missing or partial |
@@ -16,7 +16,7 @@ Generated from the *pinned original* geruninn source command branches vs new ind
 | `calendarCreated` | business-domain.js | No equivalent | Missing or partial |
 | `calendarPatched` | business-domain.js | No equivalent | Missing or partial |
 | `calendarPrepareCreate` | business-domain.js | No equivalent | Missing or partial |
-| `cashAdjustment` | accounting-domain.js | No equivalent | Missing or partial |
+| `cashAdjustment` | accounting-domain.js | `cashAdjustment` | Implemented, targeted regression; original parity ongoing
 | `cleanTestData` | business-domain.js | No equivalent | Missing or partial |
 | `confirmBank` | business-domain.js | No equivalent | Missing or partial |
 | `deleteExpense` | accounting-domain.js | No equivalent | Missing or partial |
@@ -39,10 +39,10 @@ Generated from the *pinned original* geruninn source command branches vs new ind
 | `reviewBankIncome` | accounting-domain.js | No equivalent | Missing or partial |
 | `saveBankRule` | accounting-domain.js | No equivalent | Missing or partial |
 | `saveDocument` | business-domain.js | issueDocument / reviseDocument | Missing or partial |
-| `saveExpense` | business-domain.js, accounting-domain.js | `saveExpense` | Needs behavioral parity |
-| `saveExpenseCategoryRule` | accounting-domain.js | No equivalent | Missing or partial |
-| `saveSupplier` | accounting-domain.js | `saveSupplier` | Needs behavioral parity |
-| `settleSupplierInvoice` | accounting-domain.js | No equivalent | Missing or partial |
+| `saveExpense` | business-domain.js, accounting-domain.js | `saveExpense` | Implemented, targeted regression; original parity ongoing
+| `saveExpenseCategoryRule` | accounting-domain.js | `saveExpenseCategoryRule` | Implemented, targeted regression; original parity ongoing
+| `saveSupplier` | accounting-domain.js | `saveSupplier` | Implemented, targeted regression; original parity ongoing
+| `settleSupplierInvoice` | accounting-domain.js | `settleSupplierInvoice` | Implemented, targeted regression; original parity ongoing
 | `supplierFromBank` | business-domain.js, accounting-domain.js | recordSupplierTransaction / matchBankSupplier | Missing or partial |
 | `supplierTransaction` | accounting-domain.js | No equivalent | Missing or partial |
 
@@ -53,3 +53,10 @@ This matrix inventories literal `cmd.type` comparisons and `case` dispatch; comp
 ## Independent command types (current)
 
 `convertEstimateToInvoice` · `deleteTestRecord` · `importBankTransaction` · `issueDocument` · `issueReceiptForPayment` · `matchBankExpense` · `matchBankPayment` · `matchBankSupplier` · `recordSupplierTransaction` · `registerPayment` · `registerScheduleSale` · `restoreRecord` · `reviseDocument` · `saveCustomer` · `saveExpense` · `saveProject` · `saveSchedule` · `saveSettings` · `saveSupplier` · `unmatchBank` · `voidDocument` · `voidRecord`
+
+## 2026-11-13 implementation update
+
+- New core command count: **27** (old literal commands: **41**; names are not one-to-one).
+- Added `acceptEstimate` (undated acceptance, one project and schedule, no automatic sale; invoice reuse), `settleSupplierInvoice` (confirmed monthly invoice and exact prepayment deduction), `bankExclude` (explicit exclusion/re-enable), `cashAdjustment` (explicit adjustment without sales), and `saveExpenseCategoryRule` (future-only learning).
+- Added frozen original ledger equivalence tests, old unpaid notice preview, historical PDF import read-only preview, and 15-collection legacy shadow.
+- **Not a production-ready parity claim:** legacy command runtime behavior, real old backup samples, complete cloud auth/restoration and unknown historical fields remain separate acceptance gates.
