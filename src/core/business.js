@@ -199,9 +199,9 @@ function operate(s,cmd){
   const account=text(c.account,'銀行口座'),externalId=text(c.externalId,'銀行明細識別子');
   const match=rows(s,'bankTransactions').find(b=>b.account===account&&b.externalId===externalId);
   const amount=yen(c.amount);if(!amount)throw Error('銀行金額は正数です');
-  if(match){if(match.amount!==amount||match.direction!==c.direction)throw Error('同じ銀行明細識別子の内容が異なります');a={transaction:match,reused:true};break;}
+  if(match){if(match.amount!==amount||match.direction!==c.direction||match.date!==date(c.date,'銀行日付')||match.description!==String(c.description||''))throw Error('同じ銀行明細識別子の内容が異なります');a={transaction:match,reused:true};break;}
   if(!['income','outgoing'].includes(c.direction))throw Error('入出金区分が不正です');
-  const transaction=write(s,'bankTransactions',{id:idFor(s,'bank'),account,externalId,date:date(c.date,'銀行日付'),description:String(c.description||''),amount,direction:c.direction,matchType:'',matchId:'',status:'unmatched'});
+  const transaction=write(s,'bankTransactions',{id:idFor(s,'bank'),account,externalId,date:date(c.date,'銀行日付'),description:String(c.description||''),amount,direction:c.direction,balance:c.balance??null,memo:String(c.memo||''),occurrence:c.occurrence||1,confidence:c.confidence||'review',rawDescription:String(c.rawDescription||''),matchType:'',matchId:'',status:'unmatched'});
   a={transaction,reused:false};break;}
  case 'matchBankPayment':{
   const b=requireRow(s,'bankTransactions',c.bankTxnId),p=requireRow(s,'payments',c.paymentId);
