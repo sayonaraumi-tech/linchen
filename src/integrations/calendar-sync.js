@@ -23,7 +23,7 @@ function originalLink(state,event){
 function eventIdentity(event){return event.calendarId+'|'+event.eventId;}
 async function applyIncoming(state,{calendarId,events,digest,allowCancelled=false}){
  if(!Array.isArray(events)||typeof digest!=='function')throw Error('Calendar events and digest are required');
- let next=clone(state),added=0,updated=0,skipped=0,cancelled=0;
+ let next=clone(state),added=0,updated=0,skipped=0,cancelled=0,reviews=[];
  for(const raw of events){
   const ev=parseGoogleEvent(calendarId,raw);
   if(irrelevant(ev)){skipped++;continue;}
@@ -37,9 +37,7 @@ async function applyIncoming(state,{calendarId,events,digest,allowCancelled=fals
   // Remote date changes require an explicit local review, never silent mutation.
   if(old&&old.date!==ev.date&&old.registeredSaleId){
    skipped++;
-   if(!next.calendarConflicts)next.calendarConflicts=[];
-   if(!next.calendarConflicts.some(x=>x.scheduleId===old.id&&x.googleUpdatedAt===ev.updated))
-    next.calendarConflicts.push({scheduleId:old.id,calendarId,eventId:ev.eventId,
+   reviews.push({scheduleId:old.id,calendarId,eventId:ev.eventId,
       originalDate:old.date,incomingDate:ev.date,googleUpdatedAt:ev.updated,reason:'booked-schedule-date-conflict'});
    continue;
   }
@@ -50,7 +48,7 @@ async function applyIncoming(state,{calendarId,events,digest,allowCancelled=fals
   const result=B.perform(next,{type:'saveSchedule',operationId:'calendar_'+key.slice(0,40)+'_'+(ev.updated?await digest(ev.updated):await digest(JSON.stringify(ev))).slice(0,24),id,date:ev.date,title:ev.title,description:ev.description,googleEventId:ev.eventId,calendarId:ev.calendarId,googleUpdatedAt:ev.updated,googleStatus:ev.status,location:ev.location,start:ev.start,end:ev.end});
   next=result.state;if(old)updated++;else added++;
  }
- return {state:next,summary:{added,updated,skipped,cancelled}};
+ return {state:next,summary:{added,updated,skipped,cancelled},reviews};
 }
 async function collectPages(fetchPage,{calendarId,timeMin,timeMax}){
  if(typeof fetchPage!=='function'||!calendarId)throw Error('Calendar fetch adapter missing');
