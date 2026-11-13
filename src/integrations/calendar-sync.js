@@ -33,6 +33,16 @@ async function applyIncoming(state,{calendarId,events,digest,allowCancelled=fals
    if(!allowCancelled||!old){skipped++;continue;}
   }
   if(old?.googleUpdatedAt&&ev.updated&&ev.updated<old.googleUpdatedAt){skipped++;continue;}
+  // A confirmed construction sale/formal invoice owns its original work identity.
+  // Remote date changes require an explicit local review, never silent mutation.
+  if(old&&old.date!==ev.date&&old.registeredSaleId){
+   skipped++;
+   if(!next.calendarConflicts)next.calendarConflicts=[];
+   if(!next.calendarConflicts.some(x=>x.scheduleId===old.id&&x.googleUpdatedAt===ev.updated))
+    next.calendarConflicts.push({scheduleId:old.id,calendarId,eventId:ev.eventId,
+      originalDate:old.date,incomingDate:ev.date,googleUpdatedAt:ev.updated,reason:'booked-schedule-date-conflict'});
+   continue;
+  }
   if(old&&old.date===ev.date&&old.title===ev.title&&old.description===ev.description&&old.location===ev.location&&old.googleStatus===ev.status){skipped++;continue;}
   const key=await digest(eventIdentity(ev));
   if(!/^[a-f0-9]{32,128}$/i.test(key))throw Error('Digest output must be hex');
@@ -79,6 +89,7 @@ async function pushInternalEvent({schedule,calendarId,provider,digest}){
   location:schedule.location||'',
   start:{date:schedule.date},
   end:{date:new Date(Date.parse(schedule.date+'T00:00:00Z')+86400000).toISOString().slice(0,10)},
+  extendedProperties:{private:{tsukinowaScheduleId:schedule.id,tsukinowaSyncVersion:'1'}},
  };
  let result;
  try{
@@ -89,7 +100,9 @@ async function pushInternalEvent({schedule,calendarId,provider,digest}){
   }
  }catch(e){
   if(e.status===409&&!schedule.googleEventId){
-   try{result=await provider.get({calendarId,eventId});if(!result||result.id!==eventId)throw Error('Cannot verify existing Google event');}
+   try{result=await provider.get({calendarId,eventId});
+    if(!result||result.id!==eventId||result.extendedProperties?.private?.tsukinowaScheduleId!==schedule.id)
+     throw Error('Cannot verify our original Google event');}
    catch{return {status:'requires-review',reason:'Google event identity collision',eventId};}
   }else if(e.status===409||e.status===412){
    return {status:'conflict',requiresReview:true,reason:'Google Calendarの同時変更を確認してください',eventId};
