@@ -13,6 +13,7 @@ const COLLECTIONS=Object.freeze(['settings','customers','projects','schedule','d
 const TYPES=Object.freeze(['estimate','invoice','receipt','onoda']);
 const clone=x=>JSON.parse(JSON.stringify(x));
 const yen=x=>{if(typeof x==='string'&&!/^\d+$/.test(x.trim()))throw Error('金額は円単位の整数で入力してください');const n=Number(x);if(!Number.isSafeInteger(n)||n<0)throw Error('金額は0以上の安全な整数を指定してください');return n;};
+const signedYen=x=>{if(typeof x==='string'&&!/^-?\d+$/.test(x.trim()))throw Error('残高は円単位の整数で入力してください');const n=Number(x);if(!Number.isSafeInteger(n))throw Error('残高は安全な整数で入力してください');return n;};
 const text=(v,k)=>{let s=String(v??'').trim();if(!s)throw Error(k+'は必須です');return s;};
 const date=(v,k='日付')=>{const s=text(v,k);if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||Number.isNaN(Date.parse(s))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)throw Error(k+'の形式が不正です');return s;};
 const active=r=>!!r&&!r.deletedAt&&r.status!=='void'&&r.status!=='cancelled';
@@ -87,7 +88,10 @@ function issue(s,x){
  }
  if(docType==='receipt'){
   if(x.saleId){sale=requireRow(s,'sales',x.saleId);}
-  else sale=registerSale(s,'receipt:'+String(s.seq+1),{customer,amount,salesDate:issueDate,invoiceDate:'',description:snapshot.tadashi||''});
+  else {
+   if(snapshot.paymentMethod!=='現金')throw Error('現金以外の独立領収書は既存売上・入金との明示的な紐付けが必要です');
+   sale=registerSale(s,'receipt:'+String(s.seq+1),{customer,amount,salesDate:issueDate,invoiceDate:'',description:snapshot.tadashi||''});
+  }
   if(x.paymentId){
    pay=requireRow(s,'payments',x.paymentId);
    if(pay.saleId!==sale.id||pay.amount!==amount||![CASH,BANK_CONFIRMED].includes(pay.confirmation))throw Error('指定した確認済入金と領収書が一致しません');
@@ -169,8 +173,8 @@ function operate(s,cmd){
  case 'registerPayment':a=payment(s,c);break;
  case 'saveSupplier':{
   const id=c.id||idFor(s,'supplier'),old=row(s,'suppliers',id);
-  if(old&&c.openingBalance!==undefined&&yen(c.openingBalance)!==old.openingBalance&&rows(s,'supplierTransactions').some(x=>active(x)&&x.supplierId===id))throw Error('取引後の期首残高変更は訂正処理が必要です');
-  a=write(s,'suppliers',{...old,id,name:text(c.name,'仕入先名'),openingBalance:old?.openingBalance??yen(c.openingBalance||0),status:'active'});break;}
+  if(old&&c.openingBalance!==undefined&&signedYen(c.openingBalance)!==old.openingBalance&&rows(s,'supplierTransactions').some(x=>active(x)&&x.supplierId===id))throw Error('取引後の期首残高変更は訂正処理が必要です');
+  a=write(s,'suppliers',{...old,id,name:text(c.name,'仕入先名'),openingBalance:old?.openingBalance??signedYen(c.openingBalance||0),status:'active'});break;}
  case 'recordSupplierTransaction':{
   const supplier=requireRow(s,'suppliers',c.supplierId);
   if(!['prepayment','payment','monthlyInvoice'].includes(c.transactionType))throw Error('仕入先取引区分が不正です');
