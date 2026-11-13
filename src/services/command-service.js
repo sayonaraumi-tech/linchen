@@ -14,15 +14,19 @@ async function requestHash(command){
  const digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);
  return Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
 }
-function createCommandService({repository,maximumChanges=6}={}){
+function createCommandService({repository,maximumChanges=6,maximumRecords=2000}={}){
  if(!repository||!['list','read','apply','readOperation'].every(k=>typeof repository[k]==='function'))throw Error('Transactional Firestore repository required');
  if(!Number.isInteger(maximumChanges)||maximumChanges<2||maximumChanges>8)throw Error('Invalid maximum changes');
+ if(!Number.isInteger(maximumRecords)||maximumRecords<1||maximumRecords>10000)throw Error('Invalid maximum records');
  async function load(){
   const first=await repository.read('settings',META_ID);
   const state=Domain.emptyState('production');
   const snapshots={};
+  let scanned=0;
   for(const collection of COLLECTIONS){
    const records=await repository.list(collection);
+   scanned+=records.length;
+   if(scanned>maximumRecords)throw Error('大量履歴データを全件読込する操作は未対応です。ページ分割された信頼済サーバ処理が必要です');
    for(const r of records){
     if(collection==='settings'&&r.id===META_ID)continue;
     if(!r.payload||!Number.isInteger(r.revision))throw Error('Invalid Firestore record: '+collection+'/'+r.id);
