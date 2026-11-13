@@ -49,7 +49,12 @@ function documents(){
 }
 function history(){
  const docs=list('documents').sort((a,b)=>b.issueDate.localeCompare(a.issueDate));
- const rows=docs.map(d=>'<tr><td>'+esc(d.invoiceNo)+'</td><td>'+esc(d.docType)+'</td><td>'+esc(d.customer)+'</td><td>'+esc(amount(d.amount))+'</td><td>'+esc(d.status)+'</td><td>'+esc(d.id)+'</td><td>'+button('voidDocument',d.id,'無効化')+' '+button('deleteTestRecord',d.id,'テスト削除')+'</td></tr>');
+ const payments=list('payments'),allDocs=list('documents');
+ const rows=docs.map(d=>{
+  const linkedPayment=!!d.paymentId||payments.some(p=>p.status==='active'&&p.saleId===d.saleId&&d.saleId);
+  const sharedSale=!!d.saleId&&allDocs.some(other=>other.id!==d.id&&other.saleId===d.saleId&&other.status==='active');
+  const voidControl=d.status==='active'&&!linkedPayment&&!sharedSale?button('voidDocument',d.id,'無効化'):'原本保持・参照のみ';
+  return '<tr><td>'+esc(d.invoiceNo)+'</td><td>'+esc(d.docType)+'</td><td>'+esc(d.customer)+'</td><td>'+esc(amount(d.amount))+'</td><td>'+esc(d.status)+'</td><td>'+esc(d.id)+'</td><td>'+voidControl+' '+button('deleteTestRecord',d.id,'テスト削除')+'</td></tr>';});
  return page('帳票履歴','確定帳票の番号と内容を保持。過去帳票の無効化は理由が必要です。',
  grid(['帳票番号','種別','宛名','金額','状態','ID','操作'],rows));
 }
