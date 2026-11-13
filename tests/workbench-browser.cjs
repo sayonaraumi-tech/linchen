@@ -204,7 +204,7 @@ test('estimate -> invoice -> bank payment -> receipt -> HOME remains one sale an
   await app.page.locator('[name=amount]').fill('10000');
   await app.page.getByRole('button',{name:'帳票を正式保存'}).click();
   await app.page.getByRole('button',{name:'帳票履歴',exact:true}).click();
-  app.page.on('dialog',d=>d.accept());
+  app.page.on('dialog',d=>d.type()==='prompt'?d.accept(d.defaultValue()):d.accept());
   await app.page.getByRole('button',{name:'請求書に変換'}).click();
   await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('請求書を発行'));
   let data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
@@ -278,7 +278,7 @@ test('saved historical document re-downloads real frozen PDF without changing ac
   const before=await app.page.evaluate(()=>localStorage.getItem('linchen_independent_test_v1'));
   const pending=app.page.waitForEvent('download',{timeout:45000});
   await app.page.getByRole('button',{name:'原版PDF'}).click();
-  const downloaded=await pending;
+  const downloaded=await Promise.race([pending,app.page.waitForFunction(()=>document.querySelector('#status')?.dataset.error==='true',{timeout:40000}).then(async()=>{throw new Error(await app.page.locator('#status').innerText())})]);
   assert(downloaded.suggestedFilename().endsWith('.pdf'));
   const buffer=require('node:fs').readFileSync(await downloaded.path());
   assert.equal(buffer.subarray(0,4).toString('ascii'),'%PDF');
