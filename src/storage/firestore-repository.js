@@ -39,11 +39,12 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
   * No delete, no blind writes, no client-controlled actor or audit metadata.
   * Caller must validate the domain command before calling apply().
   */
- async function apply({operationId,action,changes}={}){
+ async function apply({operationId,action,changes,requestHash=null}={}){
   if(!writeEnabled)throw Error('Firestore書込は検証完了まで無効です');
   const user=await identity();
   if(user.role!=='admin')throw Error('会計・正式登録は管理者のみです');
   requireId(operationId,'操作');requireId(action,'操作種別');
+  if(requestHash!==null&&!/^[0-9a-f]{64}$/.test(requestHash))throw Error('操作指紋の形式が不正です');
   if(!Array.isArray(changes)||changes.length<1||changes.length>10)throw Error('更新件数が不正です');
   const seen=new Set();
   for(const c of changes){
@@ -59,7 +60,7 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
    const marker=await tx.get(sdk.doc(db,operationPath));
    if(marker.exists()){
     const prev=marker.data();
-    if(prev.action!==action||prev.actorId!==user.uid||prev.signature!==signature)throw Error('操作IDの重複内容が不一致です');
+    if(prev.action!==action||prev.actorId!==user.uid||prev.signature!==signature||(requestHash!==null&&prev.requestHash!==requestHash))throw Error('操作IDの重複内容が不一致です');
     return {operationId,reused:true,targets:prev.targets};
    }
    const old=[];
@@ -85,7 +86,9 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
     tx.set(sdk.doc(db,path('auditLogs',auditId)),{operationId,userId:user.uid,companyId,entityType:c.collection,entityId:c.id,action,before:previous?.payload||null,after:structuredClone(c.payload),timestamp:now});
    }
    for(const c of numberClaims){tx.set(sdk.doc(db,base+'/documentNumbers/'+c.payload.invoiceNo),{invoiceNo:c.payload.invoiceNo,operationId,actorId:user.uid,companyId,documentId:c.id,createdAt:now});}
-   tx.set(sdk.doc(db,operationPath),{operationId,action,actorId:user.uid,companyId,targets,signature,createdAt:now});
+   const marker={operationId,action,actorId:user.uid,companyId,targets,signature,createdAt:now};
+   if(requestHash!==null)marker.requestHash=requestHash;
+   tx.set(sdk.doc(db,operationPath),marker);
    return {operationId,reused:false,targets};
   });
  }
