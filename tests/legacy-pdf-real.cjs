@@ -64,6 +64,11 @@ async function runOne(browser,endpoint,group,width,test){
  if(test.type!=='receipt')assert.equal(meta.rowCount,test.rows,group+' '+test.name+' rows mismatch');
  if(test.type==='onoda')assert.equal(meta.mode,test.rows<=16?'normal-16':'multipage',group+' '+test.name+' mode');
  const pdfPath=path.join(out,group+'-'+test.name+'-'+width+'.pdf');
+ await page.evaluate(async()=>{
+  await document.fonts.ready;
+  await Promise.all([...document.images].map(async img=>{try{if(img.decode)await img.decode();}catch{}}));
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ });
  const downloadPromise=page.waitForEvent('download',{timeout:15000});
  await page.evaluate(()=>doPrint());
  const download=await downloadPromise;
