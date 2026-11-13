@@ -51,3 +51,35 @@ test('overpaid original receivable blocks silent ledger projection',()=>{
  const s=createShadow(d,{requireFullExport:true});
  assert.throws(()=>s.receivableRows(),/overpaid/);
 });
+
+test('legacy shadow unpaid balances match original frozen accounting.js receivables including dates and carried debt',()=>{
+ const old=require('../legacy-pdf/source/js/accounting.js');
+ const d=dump();
+ d.sales=[{id:'sale_1',customer:'A',salesDate:'2026-09-10',amount:11000,status:'active'},
+          {id:'sale_2',customer:'B',salesDate:'2026-10-10',amount:8000,status:'active'}];
+ d.receivables=[{id:'receivable_1',customer:'旧期繰越',salesDate:'2026-08-10',amount:3000,receivableOnly:true,status:'active'}];
+ d.payments=[{id:'pay_1',saleId:'sale_1',paymentDate:'2026-09-20',amount:4000,confirmation:'bank-confirmed'},
+             {id:'pay_2',saleId:'sale_1',paymentDate:'2026-10-20',amount:1000,confirmation:'bank-confirmed'},
+             {id:'pay_3',saleId:'receivable_1',paymentDate:'2026-09-28',amount:1000,confirmation:'cash-received'}];
+ const shadow=createShadow(d,{requireFullExport:true});
+ const asOf='2026-09-30';
+ const received=shadow.receivableRows({asOf});
+ const expected=old.receivables([...d.sales,...d.receivables],d.payments,asOf);
+ assert.deepEqual(
+  received.map(r=>({id:r.id,paid:r.confirmedPaid,unpaid:r.outstanding})).sort((a,b)=>a.id.localeCompare(b.id)),
+  expected.map(r=>({id:r.id,paid:r.paid,unpaid:r.outstanding})).sort((a,b)=>a.id.localeCompare(b.id))
+ );
+ assert.equal(received.filter(r=>!r.receivableOnly).reduce((n,r)=>n+r.amount,0),11000);
+ assert.equal(received.reduce((n,r)=>n+r.outstanding,0),9000);
+});
+test('old revised and duplicate business rows are excluded from balances like original accounting domain',()=>{
+ const old=require('../legacy-pdf/source/js/accounting.js');
+ const d=dump();
+ d.sales=[{id:'sale_1',amount:1000,salesDate:'2026-09-01',documentStatus:'duplicate'},
+          {id:'sale_2',amount:2000,salesDate:'2026-09-01',status:'revised'},
+          {id:'sale_3',amount:3000,salesDate:'2026-09-01'}];
+ const shadow=createShadow(d,{requireFullExport:true}),actual=shadow.receivableRows();
+ const expected=old.receivables(d.sales,[], '9999-12-31');
+ assert.deepEqual(actual.map(x=>x.id),expected.map(x=>x.id));
+ assert.equal(actual.length,1);
+});
