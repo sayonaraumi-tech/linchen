@@ -85,3 +85,21 @@ test('real Firestore domain service atomically creates invoice and cash receipt 
  assert.equal((await service.execute(receipt)).reused,true);
  assert.equal((await repo.list('cashLedger')).length,1);
 });
+
+test('two concurrent administrators cannot silently overwrite shared business IDs',async()=>{
+ const {createCommandService}=require('../src/services/command-service');
+ const svc1=createCommandService({repository:context('admin','admin').repo,maximumChanges:6});
+ const svc2=createCommandService({repository:context('admin2','admin').repo,maximumChanges:6});
+ const commands=[
+  {operationId:'concurrent-project-one',type:'saveProject',customer:'同時申請A'},
+  {operationId:'concurrent-project-two',type:'saveProject',customer:'同時申請B'}
+ ];
+ const both=await Promise.allSettled([svc1.execute(commands[0]),svc2.execute(commands[1])]);
+ for(const [i,r] of both.entries())if(r.status==='rejected'){
+  await (i===0?svc1:svc2).execute(commands[i]);
+ }
+ const saved=(await context('admin','admin').repo.list('projects'))
+   .filter(r=>['同時申請A','同時申請B'].includes(r.payload.customer));
+ assert.equal(saved.length,2);
+ assert.notEqual(saved[0].id,saved[1].id);
+});
