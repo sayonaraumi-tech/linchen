@@ -51,3 +51,12 @@
 ## 5. 发布控制
 
 `linchen` PR #1 保持 **Draft**。禁止自动 merge、修改旧仓库、连接正式 Firebase、清空或更改用户历史数据、导入真实资料，以及进入第 6 阶段 UI 代码实施。
+
+## 6. 同日追加：高级银行收入、供应商取消和模拟器事务复测
+
+- `reviewBankIncome`：GMO 银行入金仅在人工审核后归类为 `受取利息` / `雑収入`，不产生工事売上和第二笔入金。解除照合时取消该收入分类；HOME/期间报表列出 `otherIncome`，并按实际银行日期归属。
+- `voidSupplierTransaction`：明示理由取消供应商交易；已与银行照合的先解除照合；若是月度請求则相关材料費同时无效，若是现金预付则撤销唯一现金镜像；原交易及审计仍保留。
+- 原本 `recordSupplierTransaction` 不得复用已取消的交易 ID，防止取消后静默再创建。
+- Firestore Emulator 测试已加入 `acceptEstimate` 和 `settleSupplierInvoice` 的完整原子事务及重试用例。
+- 最近结果：核心业务 **142/142** 通过（https://github.com/sayonaraumi-tech/linchen/actions/runs/43416178562）；Firestore Emulator **9/9** 通过（https://github.com/sayonaraumi-tech/linchen/actions/runs/43416172444）。
+- **仍不满足正式上线或第6阶段 UI 准入**：全量历史实物、旧所有高风险命令、云端安全业务校验/恢复及 PDF 非确定性仍有缺口。
