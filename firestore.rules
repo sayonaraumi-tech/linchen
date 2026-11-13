@@ -8,6 +8,12 @@ service cloud.firestore {
   function admin(company) {
    return member(company) && request.auth.token.role == 'admin';
   }
+  // Default-deny all client writes outside explicitly isolated test claims.
+  // Production accounting must be executed by a trusted backend that verifies
+  // domain invariants; client-owned audit markers alone are not sufficient.
+  function isolatedAdmin(company) {
+   return admin(company) && request.auth.token.linchenSandbox == true;
+  }
   function businessCollection(name) {
    return name in ['settings','customers','projects','schedule','documents','sales','payments',
     'expenses','cashLedger','bankTransactions','suppliers','supplierTransactions','calendarLinks'];
@@ -67,7 +73,7 @@ service cloud.firestore {
   }
   match /companies/{company}/operations/{operationId} {
    allow get,list: if admin(company);
-   allow create: if admin(company)
+   allow create: if isolatedAdmin(company)
      && request.resource.data.keys().hasOnly(['operationId','action','actorId','companyId',
        'targets','signature','requestHash','createdAt'])
      && request.resource.data.operationId==operationId
@@ -83,7 +89,7 @@ service cloud.firestore {
   }
   match /companies/{company}/documentNumbers/{number} {
    allow get,list: if admin(company);
-   allow create: if admin(company)
+   allow create: if isolatedAdmin(company)
      && request.resource.data.keys().hasOnly(['invoiceNo','operationId','actorId','companyId','documentId','createdAt'])
      && request.resource.data.invoiceNo==number
      && request.resource.data.companyId==company
@@ -95,7 +101,7 @@ service cloud.firestore {
   }
   match /companies/{company}/auditLogs/{auditId} {
    allow get,list: if admin(company);
-   allow create: if admin(company)
+   allow create: if isolatedAdmin(company)
      && request.resource.data.keys().hasOnly(['operationId','userId','companyId',
        'entityType','entityId','action','before','after','timestamp'])
      && request.resource.data.companyId==company
@@ -111,8 +117,8 @@ service cloud.firestore {
   match /companies/{company}/{name}/{recordId} {
    allow get,list: if member(company) && businessCollection(name)
      && (request.auth.token.role == 'admin' || staffReadable(name));
-   allow create: if admin(company) && businessCollection(name) && validCreate(company,name,recordId);
-   allow update: if admin(company) && businessCollection(name) && validUpdate(company,name,recordId);
+   allow create: if isolatedAdmin(company) && businessCollection(name) && validCreate(company,name,recordId);
+   allow update: if isolatedAdmin(company) && businessCollection(name) && validUpdate(company,name,recordId);
    allow delete: if false;
   }
  }
