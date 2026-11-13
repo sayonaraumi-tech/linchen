@@ -9,7 +9,7 @@ const Sandbox=globalThis.TsukinowaSandboxStorage;
 if(!B||!Calendar||!Sandbox)throw Error('Required domain runtime missing');
 const store=Sandbox.createSandboxStore({storage:localStorage,key:'linchen_independent_test_v1'});
 const root=document.getElementById('page'),status=document.getElementById('status');
-let current='home',seq=0;
+let current='home',editing={schedule:'',customer:'',expense:''};
 const esc=x=>String(x??'').replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const amount=x=>Number(x||0).toLocaleString('ja-JP')+' 円';
 const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -31,12 +31,13 @@ function home(){
 function schedule(){
  const s=snapshot(),month=document.getElementById('calendar-month')?.value||today().slice(0,7);
  const monthView=Calendar.calendarMonth(s,month);
- const inputs=field('date','施工日','date',today())+field('title','予定名')+field('customer','取引先','text','',false)+field('description','内容','text','',false);
+ const edit=list('schedule').find(x=>x.id===editing.schedule&&x.status==='active');
+ const inputs=field('date','施工日','date',edit?.date||today())+field('title','予定名','text',edit?.title||'')+field('customer','取引先','text',edit?.customer||'',false)+field('description','内容','text',edit?.description||'',false);
  const cells=monthView.cells.map(c=>'<div class="day'+(c.inMonth?'':' outside')+'" data-date="'+esc(c.date)+'"><b>'+esc(c.day)+'</b>'+c.events.map(e=>'<div class="event">'+esc(e.title)+'<small> '+esc(e.status)+'</small></div>').join('')+'</div>').join('');
- const rows=list('schedule').filter(x=>x.status==='active').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+'</td></tr>');
+ const rows=list('schedule').filter(x=>x.status==='active').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+' '+button('schedule-edit',e.id,'編集')+' '+(!e.registeredSaleId?button('schedule-void',e.id,'取消'):'')+'</td></tr>');
  return page('日程','内部日程が主データです。Google Calendar は不要で、無接続でも追加・表示できます。',
  '<label>対象月<input type="month" id="calendar-month" value="'+esc(month)+'"></label><div class="day-grid">'+cells+'</div>'+
- form('schedule',inputs,'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID','操作'],rows));
+ form('schedule',inputs,edit?'日程の変更を保存':'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID','操作'],rows));
 }
 function documents(){
  const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],['onoda','小野田']])+
@@ -54,7 +55,11 @@ function history(){
   const linkedPayment=!!d.paymentId||payments.some(p=>p.status==='active'&&p.saleId===d.saleId&&d.saleId);
   const sharedSale=!!d.saleId&&allDocs.some(other=>other.id!==d.id&&other.saleId===d.saleId&&other.status==='active');
   const voidControl=d.status==='active'&&!linkedPayment&&!sharedSale?button('voidDocument',d.id,'無効化'):'原本保持・参照のみ';
-  return '<tr><td>'+esc(d.invoiceNo)+'</td><td>'+esc(d.docType)+'</td><td>'+esc(d.customer)+'</td><td>'+esc(amount(d.amount))+'</td><td>'+esc(d.status)+'</td><td>'+esc(d.id)+'</td><td>'+voidControl+' '+button('deleteTestRecord',d.id,'テスト削除')+'</td></tr>';});
+  const actions=button('document-detail',d.id,'内容確認')+' '
+    +(d.docType==='estimate'&&d.status==='active'?button('estimate-convert',d.id,'請求書に変換')+' ':'')
+    +(d.status==='active'?button('document-revise',d.id,'訂正')+' ':'')
+    +voidControl+' '+button('deleteTestRecord',d.id,'テスト削除');
+  return '<tr><td>'+esc(d.invoiceNo)+'</td><td>'+esc(d.docType)+'</td><td>'+esc(d.customer)+'</td><td>'+esc(amount(d.amount))+'</td><td>'+esc(d.status)+'</td><td>'+esc(d.id)+'</td><td>'+actions+'</td></tr>';});
  return page('帳票履歴','確定帳票の番号と内容を保持。過去帳票の無効化は理由が必要です。',
  grid(['帳票番号','種別','宛名','金額','状態','ID','操作'],rows));
 }
@@ -63,20 +68,22 @@ function sales(){
  const input=select('saleId','売上',s.map(x=>[x.id,x.customer+' '+amount(x.amount)]))+
  field('amount','入金額','number','1000')+field('paymentDate','入金日','date',today())+
  select('method','方法',[['現金','現金'],['銀行振込','銀行振込']]);
- const rows=s.map(x=>{const pay=payments.filter(p=>p.saleId===x.id&&p.status==='active'&&['cash-received','bank-confirmed'].includes(p.confirmation)).reduce((v,p)=>v+p.amount,0);return td([x.salesDate,x.customer,amount(x.amount),amount(pay),amount(x.amount-pay),x.id])});
+ const rows=s.map(x=>{const pay=payments.filter(p=>p.saleId===x.id&&p.status==='active'&&['cash-received','bank-confirmed'].includes(p.confirmation)).reduce((v,p)=>v+p.amount,0);
+  return '<tr>'+[x.salesDate,x.customer,amount(x.amount),amount(pay),amount(x.amount-pay),x.id].map(v=>'<td>'+esc(v)+'</td>').join('')+'<td>'+payments.filter(p=>p.saleId===x.id&&p.status==='active').map(p=>'<div>'+esc(p.id)+' '+esc(amount(p.amount))+' '+esc(p.confirmation)+' '+(['cash-received','bank-confirmed'].includes(p.confirmation)?button('payment-receipt',p.id,'領収書発行'):'')+' '+(p.sourceDocumentId?'':button('payment-void',p.id,'入金取消'))+'</div>').join('')+'</td></tr>'});
  return page('売上・入金','売上と入金を別記録で管理。現金は現金台帳と連動し、銀行振込は照合前は未入金。',
  (s.length?form('payment',input,'入金登録'):'<p>まず請求書を作成してください。</p>')+
- grid(['売上日','宛名','売上','確認済入金','未収','ID'],rows));
+ grid(['売上日','宛名','売上','確認済入金','未収','ID','入金履歴・操作'],rows));
 }
 function expenses(){
- const input=field('expenseDate','支出日','date',today())+field('vendor','支払先')+
- field('category','勘定科目','text','材料費')+field('amount','金額','number','1000')+
+ const edit=list('expenses').find(x=>x.id===editing.expense&&x.status==='active');
+ const input=field('expenseDate','支出日','date',edit?.expenseDate||today())+field('vendor','支払先','text',edit?.vendor||'')+
+ field('category','勘定科目','text',edit?.category||'材料費')+field('amount','金額','number',edit?.amount||1000)+
  select('paymentMethod','支払方法',[['現金','現金'],['銀行振込','銀行振込'],['法人信用カード','法人信用カード']]);
  const expenses=list('expenses');
- const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(e.status)+'</td><td>'+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
+ const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(e.status)+'</td><td>'+button('expense-edit',e.id,'編集')+' '+button('expense-void',e.id,'取消')+' '+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
  const cash=list('cashLedger').filter(e=>!e.deletedAt);
  return page('支出・現金','現金支出は一件の現金台帳に鏡映。重複計上しません。',
- form('expense',input,'支出登録')+grid(['日付','支払先','科目','金額','方法','状態','操作'],rows)+
+ form('expense',input,edit?'支出を変更':'支出登録')+grid(['日付','支払先','科目','金額','方法','状態','操作'],rows)+
  '<h3>現金台帳</h3>'+grid(['日付','区分','金額','元ID'],cash.map(x=>td([x.date,x.type,amount(x.amount),x.sourceId]))));
 }
 function bank(){
@@ -90,11 +97,12 @@ function bank(){
 }
 function settings(){
  const input=field('key','設定名','text','memo')+field('value','設定値','text','test');
- const customer=field('name','取引先名')+field('address','住所','text','',false);
+ const edit=list('customers').find(x=>x.id===editing.customer&&x.status==='active');
+ const customer=field('name','取引先名','text',edit?.name||'')+field('address','住所','text',edit?.address||'',false);
  const customers=list('customers');
  return page('設定','独立テストデータのみ。旧システムの設定値は取得・上書きしません。',
- form('setting',input,'設定を保存')+form('customer',customer,'取引先を追加')+
- grid(['名前','住所','ID','操作'],customers.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.address)+'</td><td>'+esc(x.id)+'</td><td>'+button('customer-delete',x.id,'テスト削除')+'</td></tr>'))+
+ form('setting',input,'設定を保存')+form('customer',customer,edit?'取引先を変更':'取引先を追加')+
+ grid(['名前','住所','ID','操作'],customers.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.address)+'</td><td>'+esc(x.id)+'</td><td>'+button('customer-edit',x.id,'編集')+' '+button('customer-delete',x.id,'テスト削除')+'</td></tr>'))+
  '<button type="button" data-action="backup">テストデータのバックアップを保存</button>');
 }
 const views={home,schedule,documents,history,sales,expenses,bank,settings};
@@ -116,7 +124,7 @@ async function submit(form){
  const data=new FormData(form),action=form.dataset.action;
  let command;
  switch(action){
- case 'schedule':command={type:'saveSchedule',date:val(data,'date'),title:val(data,'title'),customer:val(data,'customer'),description:val(data,'description')};break;
+ case 'schedule':command={type:'saveSchedule',id:editing.schedule||undefined,date:val(data,'date'),title:val(data,'title'),customer:val(data,'customer'),description:val(data,'description')};break;
  case 'document':{
   const type=val(data,'docType'),amountValue=Number(val(data,'amount'));
   const customer=val(data,'customerName'),date=val(data,'invoiceDate'),description=val(data,'description');
@@ -127,14 +135,15 @@ async function submit(form){
   break;
  }
  case 'payment':command={type:'registerPayment',saleId:val(data,'saleId'),amount:Number(val(data,'amount')),paymentDate:val(data,'paymentDate'),method:val(data,'method')};break;
- case 'expense':command={type:'saveExpense',expenseDate:val(data,'expenseDate'),vendor:val(data,'vendor'),category:val(data,'category'),amount:Number(val(data,'amount')),paymentMethod:val(data,'paymentMethod')};break;
+ case 'expense':command={type:'saveExpense',id:editing.expense||undefined,expenseDate:val(data,'expenseDate'),vendor:val(data,'vendor'),category:val(data,'category'),amount:Number(val(data,'amount')),paymentMethod:val(data,'paymentMethod')};break;
  case 'bank':command={type:'importBankTransaction',account:val(data,'account'),externalId:val(data,'externalId'),date:val(data,'date'),description:val(data,'description'),amount:Number(val(data,'amount')),direction:val(data,'direction')};break;
  case 'setting':command={type:'saveSettings',key:val(data,'key'),value:val(data,'value')};break;
- case 'customer':command={type:'saveCustomer',name:val(data,'name'),address:val(data,'address')};break;
+ case 'customer':command={type:'saveCustomer',id:editing.customer||undefined,name:val(data,'name'),address:val(data,'address')};break;
  default:throw Error('Unsupported form action');
  }
  await store.perform({...command,operationId:form.dataset.operationId});
  notice('テスト領域に保存しました：'+action);
+ if(action in editing)editing[action]='';
  render(current);
  }finally{
   form.dataset.submitting='false';
