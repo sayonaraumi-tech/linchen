@@ -67,7 +67,30 @@ test('Google connection outage does not destroy an internal schedule',async()=>{
 });
 test('Google create conflict resolves only matching deterministic event',async()=>{
  let s=B.emptyState();s=B.perform(s,{operationId:'local3',type:'saveSchedule',date:'2026-11-16',title:'クロス工事'}).state;
- const api={insert:async()=>{let e=new Error('already exists');e.status=409;throw e;},patch:async()=>{},get:async({eventId})=>({id:eventId,etag:'already'})};
+ const api={insert:async()=>{let e=new Error('already exists');e.status=409;throw e;},patch:async()=>{},get:async({eventId})=>({id:eventId,etag:'already',extendedProperties:{private:{tsukinowaScheduleId:B.list(s,'schedule')[0].id}}})};
  const r=await C.pushInternalEvent({schedule:B.list(s,'schedule')[0],calendarId:'test-calendar',provider:api,digest:hash});
  assert.equal(r.status,'synced');assert.equal(r.googleEtag,'already');
+});
+
+test('Google 409 collision is not silently adopted without exact originating schedule marker',async()=>{
+ let s=B.emptyState();s=B.perform(s,{type:'saveSchedule',operationId:'private-cal',date:'2026-11-16',title:'クロス工事'}).state;
+ const api={insert:async()=>{const e=new Error('conflict');e.status=409;throw e;},
+   patch:async()=>{},get:async({eventId})=>({id:eventId,etag:'someone-else'})};
+ const before=JSON.stringify(s);
+ const r=await C.pushInternalEvent({schedule:B.list(s,'schedule')[0],calendarId:'test-calendar',provider:api,digest:hash});
+ assert.equal(r.status,'requires-review');
+ assert.equal(JSON.stringify(s),before);
+});
+test('remote day change for booked construction schedule is retained as review, not silently changed',async()=>{
+ let s=(await C.applyIncoming(B.emptyState(),{calendarId:'c',events:[event()],digest:hash})).state;
+ const sid=B.list(s,'schedule')[0].id;
+ s=B.perform(s,{type:'registerScheduleSale',operationId:'booked',scheduleId:sid,amount:11000}).state;
+ const first=JSON.stringify(B.list(s,'sales'));
+ const remote={...event('更新内容'),start:{date:'2026-11-19'},end:{date:'2026-11-20'},updated:'2026-11-19T00:00:00Z'};
+ const res=await C.applyIncoming(s,{calendarId:'c',events:[remote],digest:hash});
+ assert.equal(res.summary.skipped,1);
+ assert.equal(B.list(res.state,'schedule')[0].date,'2026-11-16');
+ assert.equal(JSON.stringify(B.list(res.state,'sales')),first);
+ assert.equal(res.state.calendarConflicts.length,1);
+ assert.equal(res.state.calendarConflicts[0].incomingDate,'2026-11-19');
 });
