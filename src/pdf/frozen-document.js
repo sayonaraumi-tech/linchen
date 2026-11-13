@@ -20,7 +20,7 @@ function createFrozenPdfService({loadDocument,exportLegacyPDF,filenameForSnapsho
   if(typeof filename!=='string'||!filename.endsWith('.pdf'))throw Error('帳票ファイル名が不正です');
   const pdf=await exportLegacyPDF({snapshot:frozen,filename,docType:doc.docType});
   if(JSON.stringify(frozen)!==canonical)throw Error('PDF出力中に正式snapshotが変更されました');
-  if(!pdf||!(pdf instanceof Uint8Array)&&!Buffer.isBuffer(pdf))throw Error('PDFレンダラーはバイナリを返す必要があります');
+  if(!pdf||!(pdf instanceof Uint8Array))throw Error('PDFレンダラーはバイナリを返す必要があります');
   const header=Array.from(pdf.slice(0,4)).map(x=>String.fromCharCode(x)).join('');
   if(header!=='%PDF')throw Error('PDFファイルのヘッダーが不正です');
   return {filename,bytes:pdf,documentId:doc.id,invoiceNo:doc.invoiceNo};
