@@ -1,28 +1,76 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {reconcile}=require('../src/integrations/platform-settlement');
-const make=provider=>({provider,statementId:'official-2026-09',officialNet:9550,lines:[
- {sourceId:'tx1',orderId:'order1',gross:10000,fee:450,refund:0,adjustment:0}]});
-for(const provider of ['stripe','np','ato'])test(provider+' official fee and payout matched to original order and bank',()=>{
- const x=reconcile(make(provider),{orders:[{id:'order1',gross:10000}],deposits:[{provider,statementId:'official-2026-09',amount:9550}]});
- assert.equal(x.status,'reconciled');assert.equal(x.totals.gross,10000);
- assert.equal(x.totals.fees,450);assert.equal(x.bankNet,9550);assert.equal(x.postingRules.payout.includes('不新建売上'),true);
+const {reconcileMonth,monthlyReport}=require('../src/integrations/platform-settlement');
+const stripe=()=>({provider:'stripe',period:'2026-09',account:'GMO',
+ official:{documentId:'stripe-settlement-sep',gross:100000,refunds:2000,feeTotal:3500,adjustments:0,netPayout:94500},
+ bankPayouts:[{id:'bank-oct-1',account:'GMO',direction:'income',amount:94500,date:'2026-10-02'}],
+ expectedFee:3500});
+const ato=()=>({provider:'ato',period:'2026-09',account:'GMO',
+ official:{documentId:'ato-sep',gross:50000,refunds:0,feeTotal:2250,adjustments:-250,netPayout:47500},
+ bankPayouts:[{id:'bank-oct-2',account:'GMO',direction:'income',amount:47500,date:'2026-10-03'}],
+ expectedFee:2250});
+const np=()=>({provider:'np',period:'2026-09',account:'GMO',
+ official:{documentId:'np-invoice-sep',feeTotal:73582},
+ bankDebits:[{id:'np-autodebit-oct',account:'GMO',direction:'outgoing',amount:73582,date:'2026-10-27'}],
+ expectedFee:73582});
+test('NP monthly official invoice vs bank automatic debit, not payout or sale',()=>{
+ const x=reconcileMonth(np());
+ assert.equal(x.mode,'monthly-auto-debit');assert.equal(x.status,'matched');
+ assert.equal(x.bankDifference,0);assert.equal(x.feeDifference,0);
+ assert.equal(x.accountingWrites,0);assert.equal(x.readOnly,true);
+ assert.equal(x.officialNet,undefined);
 });
-test('bank payout may land later than sales period, checked by statement identity',()=>{
- const s={...make('stripe'),periodStart:'2026-09-01',periodEnd:'2026-09-30'};
- const x=reconcile(s,{orders:[{id:'order1',gross:10000}],deposits:[{provider:'stripe',statementId:s.statementId,date:'2026-10-02',amount:9550}]});
- assert.equal(x.status,'reconciled');assert.equal(x.periodEnd,'2026-09-30');
+test('NP bank withdrawal mismatch and internal fee gap are reported independently',()=>{
+ const sample=np();sample.bankDebits[0].amount=67828;sample.expectedFee=70000;
+ const x=reconcileMonth(sample);
+ assert.equal(x.bankDifference,-5754);assert.equal(x.feeDifference,3582);
+ assert.equal(x.status,'review');assert.equal(x.issues.length,2);
 });
-test('unknown official fees cannot be inferred from bank net',()=>{
- const x=reconcile(make('ato'),{deposits:[{provider:'ato',statementId:'official-2026-09',amount:9550}],orders:[]});
- assert.equal(x.status,'review');assert.equal(x.unresolved.length,1);
-});
-test('official payout different from calculation or deposit blocks reconciliation',()=>{
- const s={...make('np'),officialNet:9000};
- const x=reconcile(s,{orders:[{id:'order1',gross:10000}],deposits:[{provider:'np',statementId:s.statementId,amount:9550}]});
+test('NP missing bank evidence is not treated as zero yen withdrawal',()=>{
+ const sample=np();delete sample.bankDebits;
+ const x=reconcileMonth(sample);
+ assert.equal(x.bankDifference,null);assert.equal(x.actualBankAmount,null);
  assert.equal(x.status,'review');
- assert.equal(x.differences.officialVsCalculated,-550);assert.equal(x.differences.officialVsBank,-550);
 });
-test('same official transaction in same statement is rejected',()=>{
- const s=make('stripe');s.lines.push({...s.lines[0]});
- assert.throws(()=>reconcile(s),/重複/);
+for(const fn of [stripe,ato])test(fn().provider+' monthly payout compared to a single bank deposit',()=>{
+ const x=reconcileMonth(fn());
+ assert.equal(x.mode,'monthly-bank-payout');assert.equal(x.status,'matched');
+ assert.equal(x.netDifference,0);assert.equal(x.bankDifference,0);
+ assert.equal(x.feeDifference,0);assert.equal(x.accountingWrites,0);
+ assert.equal(x.bankEvidenceIds.length,1);
+});
+test('settlement period can differ from one monthly payout arrival date',()=>{
+ const x=reconcileMonth(stripe());
+ assert.equal(x.period,'2026-09');
+ assert.equal(x.bankEvidenceIds[0],'bank-oct-1');
+});
+test('one monthly payout may have explicitly identified split bank transfers, not individual sales',()=>{
+ const sample=stripe();
+ sample.bankPayouts=[{...sample.bankPayouts[0],amount:40000},
+   {id:'bank-oct-3',account:'GMO',direction:'income',amount:54500,date:'2026-10-03'}];
+ const x=reconcileMonth(sample);assert.equal(x.status,'matched');
+ assert.equal(x.bankEvidenceIds.length,2);
+});
+test('bank total or official fee discrepancy is reported, never posted',()=>{
+ const sample=ato();sample.bankPayouts[0].amount=47000;sample.expectedFee=2000;
+ const x=reconcileMonth(sample);
+ assert.equal(x.bankDifference,-500);assert.equal(x.feeDifference,250);
+ assert.equal(x.status,'review');assert.equal(x.accountingWrites,0);
+});
+test('actual official fee comes from statement, no fixed NP or Stripe rates',()=>{
+ const sample=stripe();sample.official.feeTotal=9999;
+ const x=reconcileMonth(sample);
+ assert.equal(x.officialFee,9999);assert.equal(x.netDifference,6499);
+});
+test('bad bank direction/account is not silently matched',()=>{
+ const sample=np();sample.bankDebits[0].direction='income';
+ assert.throws(()=>reconcileMonth(sample),/入出金方向/);
+});
+test('one monthly reconciliation per platform and account; duplicates rejected',()=>{
+ const records=monthlyReport([stripe(),ato(),np()]);
+ assert.equal(records.length,3);
+ assert.throws(()=>monthlyReport([stripe(),stripe()]),/重複/);
+});
+test('reconciling external provider records cannot mutate official or bank sources',()=>{
+ const data=Object.freeze({...stripe(),official:Object.freeze({...stripe().official}),bankPayouts:Object.freeze([Object.freeze({...stripe().bankPayouts[0]})])});
+ const original=JSON.stringify(data);reconcileMonth(data);assert.equal(JSON.stringify(data),original);
 });
