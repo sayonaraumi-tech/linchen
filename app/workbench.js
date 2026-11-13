@@ -158,6 +158,56 @@ async function clickAction(btn){
   a.href=url;a.download='linchen-test-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),0);
   notice('テストバックアップを書き出しました');return;
  }
+ if(['schedule-edit','expense-edit','customer-edit'].includes(action)){
+  const key=action.slice(0,-5),collection={schedule:'schedule',expense:'expenses',customer:'customers'}[key];
+  if(!list(collection).some(x=>x.id===id&&x.status==='active'))throw Error('有効な編集対象がありません');
+  editing[key]=id;render(current);notice('編集対象を選択しました');return;
+ }
+ if(['schedule-void','expense-void'].includes(action)){
+  const reason=prompt('取消理由を入力してください');
+  if(!reason)return;
+  await store.perform({type:'voidRecord',collection:action==='schedule-void'?'schedule':'expenses',id,reason,operationId:operationId()});
+  notice('対象を取消しました。履歴は保持します');render(current);return;
+ }
+ if(action==='document-detail'){
+  const d=list('documents').find(x=>x.id===id);
+  if(!d)throw Error('帳票が見つかりません');
+  const details=JSON.stringify({id:d.id,invoiceNo:d.invoiceNo,docType:d.docType,status:d.status,snapshot:d.snapshot},null,2);
+  const dialog=document.createElement('dialog'),pre=document.createElement('pre');
+  pre.textContent=details;pre.style.whiteSpace='pre-wrap';pre.style.maxHeight='60vh';pre.style.overflow='auto';
+  const close=document.createElement('button');close.textContent='閉じる';close.addEventListener('click',()=>dialog.close());
+  dialog.addEventListener('close',()=>dialog.remove());
+  dialog.append(pre,close);document.body.append(dialog);dialog.showModal();return;
+ }
+ if(action==='estimate-convert'){
+  if(!confirm('見積書の内容を変えずに請求書を発行します。新しい請求書番号を採番し、売上を一回だけ登録します。'))return;
+  await store.perform({type:'convertEstimateToInvoice',operationId:operationId(),estimateId:id,invoiceDate:today()});
+  notice('見積書から請求書を発行しました');render();return;
+ }
+ if(action==='payment-receipt'){
+  if(!confirm('確認済入金を再利用して領収書を発行します。売上・入金は追加しません。'))return;
+  await store.perform({type:'issueReceiptForPayment',operationId:operationId(),paymentId:id});
+  notice('既存入金の領収書を発行しました');render();return;
+ }
+ if(action==='payment-void'){
+  const reason=prompt('入金取消理由を入力してください（銀行照合済みは照合解除が先）');
+  if(!reason)return;
+  await store.perform({type:'voidRecord',collection:'payments',id,reason,operationId:operationId()});
+  notice('入金を取消しました');render();return;
+ }
+ if(action==='document-revise'){
+  const doc=list('documents').find(d=>d.id===id);
+  if(!doc||doc.status!=='active')throw Error('有効な帳票が必要です');
+  const reason=prompt('訂正理由を入力してください');
+  if(!reason)return;
+  const customer=prompt('訂正後の宛名',doc.customer);
+  if(customer===null)return;
+  const corrected=JSON.parse(JSON.stringify(doc.snapshot));corrected.customerName=customer;
+  corrected.invoiceDate=today();
+  await store.perform({type:'reviseDocument',operationId:operationId(),documentId:id,reason,
+    amount:doc.amount,newSnapshot:corrected});
+  notice('原本を保持したまま訂正版を発行しました');render();return;
+ }
  if(action==='schedule-sale'){
   const amountText=prompt('工事売上の税込金額（円）');
   if(amountText===null)return;
