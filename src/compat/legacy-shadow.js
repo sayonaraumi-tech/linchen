@@ -109,7 +109,8 @@ function createShadow(dump,{requireFullExport=false}={}){
    totals:{anchors:ledger.length,amount:ledger.reduce((n,x)=>n+x.amount,0),
     collected:ledger.reduce((n,x)=>n+x.confirmedPaid,0),
     outstanding:ledger.reduce((n,x)=>n+x.outstanding,0)},
-   canPromote:false, // a historical read-only shadow never authorizes migration
+   canPromote:false // a historical read-only shadow never authorizes migration
+  };
  }
  return {readonly:true,inventory,rows,get,oldDocument,oldSale,paymentsFor,receivableRows,calendarRows,estimatesRows,reconcile};
 }
