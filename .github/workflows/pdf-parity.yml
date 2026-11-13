@@ -1,8 +1,16 @@
 name: Original PDF parity
 on:
   pull_request:
+    paths:
+      - 'legacy-pdf/**'
+      - 'tests/legacy-pdf-real.cjs'
+      - '.github/workflows/pdf-parity.yml'
   push:
     branches: [develop/tsukinowa-construction]
+    paths:
+      - 'legacy-pdf/**'
+      - 'tests/legacy-pdf-real.cjs'
+      - '.github/workflows/pdf-parity.yml'
 permissions:
   contents: read
 jobs:
