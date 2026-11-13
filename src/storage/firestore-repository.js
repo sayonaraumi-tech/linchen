@@ -20,6 +20,11 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
  function collectionName(name){if(!COLLECTIONS.includes(name))throw Error('Unknown collection: '+name);return name;}
  function path(name,id){return base+'/'+collectionName(name)+'/'+requireId(id,'記録');}
  function canRead(user,name){if(user.role==='staff'&&!STAFF_READ.has(name))throw Error('この記録は管理者のみです');}
+ async function readOperation(operationId){
+  const user=await identity();if(user.role!=='admin')throw Error('操作記録は管理者のみです');
+  const snap=await sdk.getDoc(sdk.doc(db,base+'/operations/'+requireId(operationId,'操作')));
+  return snap.exists()?snap.data():null;
+ }
  async function read(name,id){
   const user=await identity();canRead(user,name);
   const snap=await sdk.getDoc(sdk.doc(db,path(name,id)));
@@ -84,7 +89,7 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
    return {operationId,reused:false,targets};
   });
  }
- return {read,list,apply,identity,companyId};
+ return {read,list,readOperation,apply,identity,companyId};
 }
 return {COLLECTIONS,STAFF_READ:[...STAFF_READ],createRepository};
 });
