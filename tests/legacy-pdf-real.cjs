@@ -95,6 +95,17 @@ async function runOne(browser,endpoint,group,width,test){
     const b=renderPngs(row.new.pdfPath,path.join(out,'new-'+test.name+'-'+width));
     assert.equal(a.length,b.length,'rendered page count');
     row.pixelEqual=a.every((f,i)=>fs.readFileSync(f).equals(fs.readFileSync(b[i])));
+    if(!row.pixelEqual){
+      // Diagnostic only; a retry never converts a failed comparison into PASS.
+      const aAgain=await runOne(browser,old.url,'old-repeat',width,test);
+      const bAgain=await runOne(browser,fresh.url,'new-repeat',width,test);
+      const ar=renderPngs(aAgain.pdfPath,path.join(out,'old-repeat-'+test.name+'-'+width));
+      const br=renderPngs(bAgain.pdfPath,path.join(out,'new-repeat-'+test.name+'-'+width));
+      row.stability={oldSelfEqual:a.length===ar.length&&a.every((f,i)=>fs.readFileSync(f).equals(fs.readFileSync(ar[i]))),
+        newSelfEqual:b.length===br.length&&b.every((f,i)=>fs.readFileSync(f).equals(fs.readFileSync(br[i]))),
+        repeatCrossEqual:ar.length===br.length&&ar.every((f,i)=>fs.readFileSync(f).equals(fs.readFileSync(br[i])))};
+      console.error('PDF-NONDETERMINISM',test.name,width,JSON.stringify(row.stability));
+    }
     assert(row.pixelEqual,'PNG pixel mismatch');
     row.result='PASS';
    }catch(err){failed=true;row.result='FAIL';row.error=err.stack||String(err);}
