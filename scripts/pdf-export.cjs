@@ -62,7 +62,7 @@ async function renderFormal({document}){
    fitInvoiceToOnePage(invoice,docType);
    const after=collectFormState();
    if(after.invoiceNo!==invoiceNo||after.customerName!==snapshot.customerName||after.docType!==docType)throw Error('保存済み帳票の内容確認に失敗');
-   return buildPrintFilename();
+   return buildPrintFilename()+'.pdf';
   },{snapshot:doc.snapshot,docType:doc.docType,invoiceNo:doc.invoiceNo});
   if(!filename.endsWith('.pdf'))throw Error('原版PDFファイル名に誤り');
   const pending=p.waitForEvent('download',{timeout:30000});
