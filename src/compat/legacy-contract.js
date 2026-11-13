@@ -38,6 +38,14 @@ const REQUIRED_LINKS=Object.freeze({
  supplierTransactions:['supplierId','bankTxnId'],
  bankTransactions:['matchId','paymentId']
 });
+const LINK_TARGETS=Object.freeze({
+ documents:{saleId:'sales',paymentId:'payments',estimateId:'estimates',revisedFromDocumentId:'documents',duplicateOfDocumentId:'documents'},
+ sales:{documentId:'documents',estimateId:'estimates'},
+ payments:{saleId:'sales'},
+ calendarLinks:{saleId:'sales',cashSaleId:'sales',receiptSaleId:'sales',linkedInvoiceId:'documents',linkedReceiptId:'documents'},
+ cashLedger:{linkedPaymentId:'payments',linkedExpenseId:'expenses',linkedSupplierTransactionId:'supplierTransactions'},
+ supplierTransactions:{supplierId:'suppliers'}
+});
 const clone=x=>JSON.parse(JSON.stringify(x));
 function records(input){
  if(Array.isArray(input))return input;
@@ -50,22 +58,23 @@ function unwrap(entry,name){
  const p=entry.payload&&typeof entry.payload==='object'&&!Array.isArray(entry.payload)?entry.payload:entry;
  return {id:entry.id||p.id||p[name.replace(/s$/,'')+'Id']||'',payload:p,revision:entry.revision??null};
 }
-function validateLegacyDump(dump,{strictCollections=true}={}){
+function validateLegacyDump(dump,{strictCollections=true,strictLinks=false}={}){
  if(!dump||typeof dump!=='object'||Array.isArray(dump))throw Error('Legacy dump must be an object');
- const warnings=[],issues=[],inventory=[],unknown=[];
+ const warnings=[],issues=[],inventory=[],unknown=[],index=Object.create(null);
  for(const key of Object.keys(dump)){
   if(!LEGACY_COLLECTIONS.includes(key))unknown.push(key);
  }
  if(strictCollections&&unknown.length)issues.push({severity:'block',code:'unknown-collection',collections:unknown});
  for(const name of LEGACY_COLLECTIONS){
   const source=records(dump[name]),mapping=MAPPING[name];
-  const ids=new Set(),references=new Set();
+  const ids=new Set(),references=new Set(),fields=new Set();
   for(const [index,entry] of source.entries()){
    try{
     const value=unwrap(entry,name),id=value.id;
     if(!id){issues.push({severity:'block',collection:name,index,code:'missing-id'});continue;}
     if(ids.has(id)){issues.push({severity:'block',collection:name,id,code:'duplicate-id'});continue;}
     ids.add(id);
+    Object.keys(value.payload).forEach(k=>fields.add(k));
     if(mapping.target===null&&mapping.mode==='blocked')issues.push({severity:'block',collection:name,id,code:'missing-new-domain'});
     for(const key of REQUIRED_LINKS[name]||[]){
      if(value.payload[key]!==undefined&&value.payload[key]!==null&&value.payload[key]!=='')references.add(key);
@@ -81,7 +90,25 @@ function validateLegacyDump(dump,{strictCollections=true}={}){
       warnings.push({collection:name,id,code:'legacy-payment-status',confirmation:value.payload.confirmation});
    }catch(e){issues.push({severity:'block',collection:name,index,code:'invalid-record',message:e.message});}
   }
-  inventory.push({legacyCollection:name,target:mapping.target,mode:mapping.mode,count:source.length,observedLinks:[...references],note:mapping.reason});
+  index[name]=ids;
+  inventory.push({legacyCollection:name,target:mapping.target,mode:mapping.mode,count:source.length,observedFields:[...fields].sort(),observedLinks:[...references],note:mapping.reason});
+ }
+ // Link checking is optional for partial exports; strict mode is required before migration.
+ for(const [name,links] of Object.entries(LINK_TARGETS)){
+  for(const entry of records(dump[name])){
+   if(!entry||typeof entry!=='object')continue;
+   const {id,payload}=unwrap(entry,name);
+   for(const [field,target] of Object.entries(links)){
+    const value=payload[field];if(!value||!index[target])continue;
+    const targetCollectionIncluded=Object.prototype.hasOwnProperty.call(dump,target);
+    if(!targetCollectionIncluded)continue; // report is partial; do not infer loss.
+    if(!index[target].has(value)){
+     const issue={collection:name,id,field,target,code:'missing-referenced-record',reference:String(value)};
+     if(strictLinks)issues.push({severity:'block',...issue});
+     else warnings.push(issue);
+    }
+   }
+  }
  }
  return {sourceCommit:SOURCE_COMMIT,schemaVersion:2,readOnly:true,inventory,unknown,issues,warnings,
   canAutoMigrate:issues.length===0&&inventory.every(x=>x.count===0||x.mode==='safe-mapped')};
@@ -90,5 +117,5 @@ function compareSnapshots(original,after){
  const left=JSON.stringify(original),right=JSON.stringify(after);
  return {unchanged:left===right,oldBytes:left.length,newBytes:right.length};
 }
-return {SOURCE_COMMIT,LEGACY_COLLECTIONS,NEW_COLLECTIONS,LOCAL_KEYS,MAPPING,REQUIRED_LINKS,validateLegacyDump,compareSnapshots};
+return {SOURCE_COMMIT,LEGACY_COLLECTIONS,NEW_COLLECTIONS,LOCAL_KEYS,MAPPING,REQUIRED_LINKS,LINK_TARGETS,validateLegacyDump,compareSnapshots};
 });
