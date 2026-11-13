@@ -33,10 +33,10 @@ function schedule(){
  const monthView=Calendar.calendarMonth(s,month);
  const inputs=field('date','施工日','date',today())+field('title','予定名')+field('customer','取引先','text','',false)+field('description','内容','text','',false);
  const cells=monthView.cells.map(c=>'<div class="day'+(c.inMonth?'':' outside')+'" data-date="'+esc(c.date)+'"><b>'+esc(c.day)+'</b>'+c.events.map(e=>'<div class="event">'+esc(e.title)+'<small> '+esc(e.status)+'</small></div>').join('')+'</div>').join('');
- const rows=list('schedule').filter(x=>x.status==='active').map(e=>td([e.date,e.title,e.customer||'',e.registeredSaleId?'売上登録済':'予定',e.googleEventId?'Google連携':'内部',e.id]));
+ const rows=list('schedule').filter(x=>x.status==='active').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+'</td></tr>');
  return page('日程','内部日程が主データです。Google Calendar は不要で、無接続でも追加・表示できます。',
  '<label>対象月<input type="month" id="calendar-month" value="'+esc(month)+'"></label><div class="day-grid">'+cells+'</div>'+
- form('schedule',inputs,'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID'],rows));
+ form('schedule',inputs,'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID','操作'],rows));
 }
 function documents(){
  const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],['onoda','小野田']])+
@@ -79,8 +79,9 @@ function bank(){
  field('description','摘要')+field('amount','金額','number','1000')+
  select('direction','入出金',[['income','入金'],['outgoing','出金']]);
  const banks=list('bankTransactions');
- return page('銀行照合','銀行明細は入出金の証拠。登録だけでは売上や支出を作りません。照合は対象の入金／支出が必要です。',
- form('bank',input,'銀行明細のテスト登録')+grid(['日付','摘要','金額','入出金','状態','ID'],banks.map(x=>td([x.date,x.description,amount(x.amount),x.direction,x.status,x.id]))));
+ const rows=banks.map(x=>'<tr><td>'+esc(x.date)+'</td><td>'+esc(x.description)+'</td><td>'+esc(amount(x.amount))+'</td><td>'+esc(x.direction)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.id)+'</td><td>'+(x.status==='matched'?button('bank-unmatch',x.id,'照合解除'):button('bank-match',x.id,'候補を確認'))+'</td></tr>');
+ return page('銀行照合','銀行明細は入出金の証拠。登録だけでは売上や支出を作りません。候補を確認し、明示的な承認があって初めて既存の入金・支出と照合します。',
+ form('bank',input,'銀行明細のテスト登録')+grid(['日付','摘要','金額','入出金','状態','ID','操作'],rows));
 }
 function settings(){
  const input=field('key','設定名','text','memo')+field('value','設定値','text','test');
@@ -132,7 +133,34 @@ async function clickAction(btn){
   a.href=url;a.download='linchen-test-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),0);
   notice('テストバックアップを書き出しました');return;
  }
- const map={ 'customer-delete':'customers','expense-delete':'expenses'};
+ if(action==='schedule-sale'){
+  const amountText=prompt('工事売上の税込金額（円）');
+  if(amountText===null)return;
+  if(!/^\d+$/.test(amountText.trim()))throw Error('税込金額は円単位の正数で指定してください');
+  const ev=list('schedule').find(x=>x.id===id);
+  if(!ev)throw Error('予定が見つかりません');
+  await store.perform({type:'registerScheduleSale',operationId:operationId(),scheduleId:id,amount:Number(amountText),salesDate:ev.date});
+  notice('同じ日程に売上を関連付けました');render();return;
+ }
+ if(action==='bank-match'){
+  const bank=list('bankTransactions').find(x=>x.id===id);
+  if(!bank||bank.status!=='unmatched')throw Error('未照合の銀行明細が必要です');
+  const pool=bank.direction==='income'?list('payments').filter(x=>x.status==='active'&&x.confirmation==='pending-bank'&&!x.bankTxnId&&x.amount===bank.amount)
+   :list('expenses').filter(x=>x.status==='active'&&x.paymentMethod!=='現金'&&!x.bankTxnId&&x.amount===bank.amount);
+  if(!pool.length)throw Error('同額の未照合対象がありません。新規入金や支出は自動作成しません');
+  const choice=prompt('対象IDを入力してください（候補: '+pool.map(x=>x.id).join(', ')+'）',pool.length===1?pool[0].id:'');
+  if(!choice)return;
+  if(!pool.some(x=>x.id===choice))throw Error('候補に存在しないIDです');
+  if(!confirm('銀行証拠を既存の'+(bank.direction==='income'?'入金':'支出')+'に照合します。金額：'+amount(bank.amount)+'。確定しますか？'))return;
+  const command=bank.direction==='income'?{type:'matchBankPayment',bankTxnId:id,paymentId:choice}:{type:'matchBankExpense',bankTxnId:id,expenseId:choice};
+  await store.perform({...command,operationId:operationId()});notice('銀行照合を確定しました');render();return;
+ }
+ if(action==='bank-unmatch'){
+  if(!confirm('この銀行明細の照合を解除しますか？'))return;
+  await store.perform({type:'unmatchBank',bankTxnId:id,operationId:operationId()});
+  notice('照合を解除しました');render();return;
+ }
+  const map={ 'customer-delete':'customers','expense-delete':'expenses'};
  if(action==='deleteTestRecord'||map[action]){
   const collection=map[action]||'documents';
   if(!confirm('テストデータの対象1件だけ削除します。ID: '+id+'。関連記録がある場合は削除できません。'))return;
