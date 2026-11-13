@@ -22,7 +22,14 @@ test('legacy Google links preserve old event ID and sale/document references',()
    linkedInvoiceId:'old-invoice',linkedEstimateId:'old-est',googlePatchPending:true}];
  d.documents=[{id:'old-invoice',confirmed:true,invoiceNo:'old-001',snapshot:{invoiceNo:'old-001',items:[]}}];
  d.estimates=[{id:'old-est',historyId:'old-invoice'}];
- assert.throws(()=>createShadow(d,{requireFullExport:true}),/Legacy data audit blocked/); // old estimate lifecycle still blocks promotion
+ const shadow=createShadow(d,{requireFullExport:true});
+ const link=shadow.calendarRows()[0];
+ assert.equal(link.googleEventId,'g123');
+ assert.equal(link.googleCalendarId,'client-cal');
+ assert.deepEqual(link.documentIds,['old-invoice']);
+ assert.equal(link.estimateId,'old-est');
+ assert.equal(shadow.estimatesRows()[0].originalId,'old-est');
+ assert.equal(shadow.reconcile().canPromote,false);
 });
 test('partial shadow can inspect old invoice without changing its snapshot',()=>{
  const d={documents:[{id:'d1',invoiceNo:'legacy-number',confirmed:true,snapshot:{invoiceNo:'legacy-number',items:[{content:'旧補修'}]}}]};
