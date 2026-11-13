@@ -55,7 +55,7 @@ function history(){
   const linkedPayment=!!d.paymentId||payments.some(p=>p.status==='active'&&p.saleId===d.saleId&&d.saleId);
   const sharedSale=!!d.saleId&&allDocs.some(other=>other.id!==d.id&&other.saleId===d.saleId&&other.status==='active');
   const voidControl=d.status==='active'&&!linkedPayment&&!sharedSale?button('voidDocument',d.id,'無効化'):'原本保持・参照のみ';
-  const actions=button('document-detail',d.id,'内容確認')+' '
+  const actions=button('document-detail',d.id,'内容確認')+' '+button('document-pdf',d.id,'原版PDF')+' '
     +(d.docType==='estimate'&&d.status==='active'?button('estimate-convert',d.id,'請求書に変換')+' ':'')
     +(d.status==='active'?button('document-revise',d.id,'訂正')+' ':'')
     +voidControl+' '+button('deleteTestRecord',d.id,'テスト削除');
@@ -168,6 +168,26 @@ async function clickAction(btn){
   if(!reason)return;
   await store.perform({type:'voidRecord',collection:action==='schedule-void'?'schedule':'expenses',id,reason,operationId:operationId()});
   notice('対象を取消しました。履歴は保持します');render(current);return;
+ }
+ if(action==='document-pdf'){
+  const doc=list('documents').find(d=>d.id===id);
+  if(!doc)throw Error('保存済帳票が見つかりません');
+  const before=JSON.stringify(snapshot());
+  notice('原版PDFを出力しています');
+  const response=await fetch('/api/test-pdf',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({document:doc})});
+  if(!response.ok){
+   const err=await response.json().catch(()=>({error:'PDF出力に失敗'}));
+   throw Error(err.error||'PDF出力に失敗');
+  }
+  const blob=await response.blob();
+  if(blob.type!=='application/pdf'||blob.size<100)throw Error('PDFが不正です');
+  const filename=decodeURIComponent(response.headers.get('X-Document-Filename')||'formal.pdf');
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=filename;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+  if(JSON.stringify(snapshot())!==before)throw Error('PDF再ダウンロード中の会計データ変更');
+  notice('原版PDFをダウンロードしました（データ変更なし）');return;
  }
  if(action==='document-detail'){
   const d=list('documents').find(x=>x.id===id);
