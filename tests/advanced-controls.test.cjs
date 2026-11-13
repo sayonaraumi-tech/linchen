@@ -38,7 +38,7 @@ test('bank exclusion blocks matching and preserves imported evidence; reenabling
  s=run(s,'unexclude',{type:'bankExclude',bankTxnId:bank.id,excluded:false,reason:'原本確認済み'});
  s=run(s,'match-ok',{type:'matchBankPayment',bankTxnId:bank.id,paymentId:pay.id});
  assert.equal(B.list(s,'bankTransactions')[0].status,'matched');
- assert.throws(()=>run(s,'bad-exclude',{type:'bankExclude',bankTxnId:bank.id,excluded:true,reason:'誤り'}),/照合解除/);
+ assert.throws(()=>run(s,'bad-exclude',{type:'bankExclude',bankTxnId:bank.id,excluded:true,reason:'誤り'}),/照合を解除/);
 });
 test('explicit cash balance adjustment never manufactures sales or expenses and cannot reuse ID with new value',()=>{
  let s=B.emptyState();const cmd={type:'cashAdjustment',adjustmentId:'opening-2026',direction:'income',date:'2026-10-01',amount:10000,description:'期首残高訂正',confirmed:true};
