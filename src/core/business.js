@@ -18,6 +18,14 @@ const text=(v,k)=>{let s=String(v??'').trim();if(!s)throw Error(k+'は必須で�
 const date=(v,k='日付')=>{const s=text(v,k);if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||Number.isNaN(Date.parse(s))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)throw Error(k+'の形式が不正です');return s;};
 const active=r=>!!r&&!r.deletedAt&&r.status!=='void'&&r.status!=='cancelled';
 const BANK_PENDING='pending-bank',BANK_CONFIRMED='bank-confirmed',CASH='cash-received';
+const EXPENSE_CATEGORIES=new Set(['材料費','材料仕入','旅費交通費','地代家賃','租税公課','給与','家賃','交通費','車両費','通信費','消耗品費','外注費','支払手数料','その他']);
+const normalizeParty=v=>String(v??'').normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase();
+const expenseRuleId=vendor=>'expense_rule_'+normalizeParty(vendor);
+function suggestExpenseCategory(state,vendor){
+ assertState(state);
+ const rule=row(state,'settings',expenseRuleId(vendor));
+ return rule?.type==='expenseCategoryRule'&&rule.enabled===true&&!rule.deletedAt?rule.category:null;
+}
 function emptyState(scope='test'){
  if(!['test','production'].includes(scope))throw Error('Invalid scope');
  return {schemaVersion:1,scope,collections:Object.fromEntries(COLLECTIONS.map(k=>[k,{}])),operationIds:{},seq:0};
@@ -118,7 +126,19 @@ function operate(s,cmd){
  switch(t){
  case 'saveSettings':{
   const key=text(c.key,'設定名');
+  if(key.startsWith('expense_rule_')||key==='_domain_metadata')throw Error('管理専用設定は通常編集できません');
   a=write(s,'settings',{id:key,key,value:clone(c.value),status:'active'});break;}
+ case 'saveExpenseCategoryRule':{
+  const vendor=text(c.vendor,'取引先');
+  const category=text(c.category,'科目');
+  if(!EXPENSE_CATEGORIES.has(category))throw Error('科目一覧から選択してください');
+  const key=normalizeParty(vendor);
+  if(key.length<2||key.length>160)throw Error('取引先名を確認してください');
+  const id=expenseRuleId(vendor),old=row(s,'settings',id);
+  if(old&&old.type!=='expenseCategoryRule')throw Error('支出分類ルールと通常設定が競合しています');
+  a=write(s,'settings',{id,type:'expenseCategoryRule',key,vendor,category,enabled:c.enabled!==false,status:'active'});
+  break;
+ }
  case 'saveCustomer':{
   const name=text(c.name,'顧客名'),id=c.id||idFor(s,'customer');
   const old=row(s,'customers',id);if(old&&!active(old))throw Error('無効な顧客を直接上書きできません');
@@ -314,7 +334,9 @@ function operate(s,cmd){
   if(old?.bankTxnId)throw Error('銀行照合を解除してから支出を訂正してください');
   if(old?.supplierTransactionId)throw Error('仕入先請求に連動する支出は仕入先台帳から訂正してください');
   if(old&&!active(old))throw Error('取消済支出は通常保存で復活できません');
-  a=write(s,'expenses',{...old,id,expenseDate:date(c.expenseDate,'支出日'),vendor:text(c.vendor,'取引先'),description:String(c.description||''),category:text(c.category,'科目'),amount,paymentMethod:text(c.paymentMethod,'支払方法'),bankTxnId:'',status:'active'});
+  const vendor=text(c.vendor,'取引先'),category=c.category?text(c.category,'科目'):suggestExpenseCategory(s,vendor);
+  if(!category)throw Error('科目を選択してください。分類ルールがない取引先です');
+  a=write(s,'expenses',{...old,id,expenseDate:date(c.expenseDate,'支出日'),vendor,description:String(c.description||''),category,amount,paymentMethod:text(c.paymentMethod,'支払方法'),bankTxnId:'',status:'active'});
   mirrorCash(s,'expenses',a);break;}
  case 'importBankTransaction':{
   const account=text(c.account,'銀行口座'),externalId=text(c.externalId,'銀行明細識別子');
@@ -337,6 +359,15 @@ function operate(s,cmd){
   const b=requireRow(s,'bankTransactions',c.bankTxnId),tx=requireRow(s,'supplierTransactions',c.transactionId);
   if(b.direction!=='outgoing'||b.status!=='unmatched'||tx.paymentMethod==='現金'||tx.type==='monthlyInvoice'||tx.bankTxnId||b.amount!==tx.amount)throw Error('仕入先送金の照合条件が一致しません');
   b.status='matched';b.matchType='supplier';b.matchId=tx.id;tx.bankTxnId=b.id;a={bank:b,transaction:tx};break;}
+ case 'bankExclude':{
+  const bank=requireRow(s,'bankTransactions',c.bankTxnId);
+  const reason=text(c.reason,'銀行除外理由');
+  if(bank.status==='matched')throw Error('銀行照合を解除してから除外してください');
+  if(!['unmatched','excluded'].includes(bank.status))throw Error('銀行明細の状態が不正です');
+  bank.status=c.excluded===false?'unmatched':'excluded';
+  bank.excludeReason=reason;
+  a=bank;break;
+ }
  case 'unmatchBank':{
   const b=requireRow(s,'bankTransactions',c.bankTxnId);
   if(b.status!=='matched')throw Error('未照合の明細です');
@@ -344,6 +375,23 @@ function operate(s,cmd){
   if(b.matchType==='expense'){const e=requireRow(s,'expenses',b.matchId);e.bankTxnId='';}
   if(b.matchType==='supplier'){const tx=requireRow(s,'supplierTransactions',b.matchId);tx.bankTxnId='';}
   b.status='unmatched';b.matchType='';b.matchId='';a=b;break;}
+ case 'cashAdjustment':{
+  if(c.confirmed!==true)throw Error('現金残高調整の明示確認が必要です');
+  const adjustmentId=text(c.adjustmentId,'調整識別子');
+  if(!/^[A-Za-z0-9_-]{1,120}$/.test(adjustmentId))throw Error('現金調整IDが不正です');
+  const id='adjustment_'+adjustmentId,amount=yen(c.amount);
+  if(!amount||!['income','expense'].includes(c.direction))throw Error('現金調整額または区分が不正です');
+  const day=date(c.date,'調整日'),description=text(c.description,'調整理由');
+  const existing=row(s,'cashLedger',id);
+  if(existing){
+   if(existing.type!==c.direction||existing.amount!==amount||existing.date!==day||existing.description!==description)
+    throw Error('同じ現金調整IDで異なる内容を上書きできません');
+   a={entry:existing,reused:true};break;
+  }
+  const entry=write(s,'cashLedger',{id,type:c.direction,date:day,description,amount,sourceType:'adjustment',
+    sourceId:id,category:'残高調整',deletedAt:null});
+  a={entry,reused:false};break;
+ }
  case 'voidRecord':{
   if(!['documents','sales','payments','expenses','schedule','projects','customers'].includes(c.collection))throw Error('取消対象外です');
   const target=requireRow(s,c.collection,c.id);text(c.reason,'取消理由');
@@ -414,5 +462,5 @@ function getOverview(s){
  return {sales:sum(sales),confirmedPayments:sum(payments),outstanding:sales.reduce((n,x)=>n+x.amount-totalPayments(s,x.id),0),expenses:sum(expenses),cashIn:sum(cash.filter(x=>x.type==='income')),cashOut:sum(cash.filter(x=>x.type==='expense')),salesCount:sales.length,expenseCount:expenses.length};
 }
 function list(s,collection){assertState(s);if(!COLLECTIONS.includes(collection))throw Error('Unsupported collection');return clone(rows(s,collection));}
-return {COLLECTIONS,TYPES,emptyState,perform,list,getOverview,balance,supplierBalance};
+return {COLLECTIONS,TYPES,emptyState,perform,list,getOverview,balance,supplierBalance,suggestExpenseCategory};
 });
