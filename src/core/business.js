@@ -55,6 +55,8 @@ function payment(s,input){
   const old=rows(s,'payments').find(p=>active(p)&&p.sourceDocumentId===input.sourceDocumentId);
   if(old){if(old.saleId!==sale.id||old.amount!==amount)throw Error('領収書に関連した既存入金が一致しません');return old;}
  }
+ const alreadyReserved=sum(rows(s,'payments').filter(p=>active(p)&&p.saleId===sale.id));
+ if(alreadyReserved+amount>sale.amount)throw Error('入金合計が売上残高を超えるため登録できません');
  const p=write(s,'payments',{id:idFor(s,'pay'),saleId:sale.id,sourceDocumentId:input.sourceDocumentId||'',amount,method,paymentDate:payDate,confirmation,bankTxnId:'',status:'active'});
  mirrorCash(s,'payments',p);
  return p;
@@ -78,7 +80,15 @@ function issue(s,x){
  if(docType==='receipt'){
   if(x.saleId){sale=requireRow(s,'sales',x.saleId);}
   else sale=registerSale(s,'receipt:'+String(s.seq+1),{customer,amount,salesDate:issueDate,invoiceDate:'',description:snapshot.tadashi||''});
-  pay=payment(s,{saleId:sale.id,amount,method:text(snapshot.paymentMethod,'入金方法'),paymentDate:issueDate,sourceDocumentId:sourceKey||'receipt:'+String(s.seq+1)});
+  if(x.paymentId){
+   pay=requireRow(s,'payments',x.paymentId);
+   if(pay.saleId!==sale.id||pay.amount!==amount||![CASH,BANK_CONFIRMED].includes(pay.confirmation))throw Error('指定した確認済入金と領収書が一致しません');
+   if(pay.sourceDocumentId&&pay.sourceDocumentId!==sourceKey)throw Error('別の領収書がすでに発行されています');
+   if(snapshot.paymentMethod&&snapshot.paymentMethod!==pay.method)throw Error('入金方法が既存の支払記録と一致しません');
+   pay.sourceDocumentId=sourceKey||pay.sourceDocumentId;
+  }else{
+   pay=payment(s,{saleId:sale.id,amount,method:text(snapshot.paymentMethod,'入金方法'),paymentDate:issueDate,sourceDocumentId:sourceKey||'receipt:'+String(s.seq+1)});
+  }
  }
  const doc=write(s,'documents',{id:idFor(s,'doc'),docType,sourceKey,customer,issueDate,amount,snapshot,items,saleId:sale?.id||'',paymentId:pay?.id||'',scheduleId:x.scheduleId||'',status:'active',revisionOf:''});
  if(sale&&!sale.documentId)sale.documentId=doc.id;
@@ -107,6 +117,45 @@ function operate(s,cmd){
   a=registerSale(s,'schedule:'+ev.id,{customer:ev.customer||ev.title,amount:c.amount,salesDate:c.salesDate||ev.date,description:ev.description,scheduleId:ev.id});
   ev.registeredSaleId=a.id;break;}
  case 'issueDocument':a=issue(s,c);break;
+ case 'reviseDocument':{
+  const original=requireRow(s,'documents',c.documentId),reason=text(c.reason,'訂正理由');
+  if(original.status!=='active')throw Error('有効な原本だけを訂正できます');
+  if(c.newSnapshot?.docType&&c.newSnapshot.docType!==original.docType)throw Error('帳票種類を変更できません');
+  const snap=clone(c.newSnapshot||{}),amount=original.docType==='receipt'?yen(snap.receiptTotal):yen(c.amount);
+  if(!amount)throw Error('訂正金額が不正です');
+  const customer=text(snap.customerName,'宛名'),newDate=date(snap.invoiceDate,'発行日');
+  if(original.saleId){
+   const sale=requireRow(s,'sales',original.saleId);
+   const confirmed=totalPayments(s,sale.id);
+   if(original.docType==='receipt'){
+    const pay=requireRow(s,'payments',original.paymentId);
+    if(amount!==pay.amount||snap.paymentMethod!==pay.method||newDate!==original.issueDate)throw Error('確定領収書の金額・日付・方法は訂正できません');
+   }else{
+    if(amount<confirmed)throw Error('訂正後請求額が確認済入金より小さくなります');
+    if(amount!==original.amount){
+     const reserved=sum(rows(s,'payments').filter(p=>active(p)&&p.saleId===sale.id));
+     if(amount<reserved)throw Error('未確定入金も含む予約済金額より少ない金額へ訂正できません');
+     sale.amount=amount;
+    }
+   }
+   sale.customer=customer;
+  }
+  original.status='revised';original.revisedReason=reason;
+  const revised=write(s,'documents',{id:idFor(s,'doc'),docType:original.docType,sourceKey:'revision:'+original.id,customer,issueDate:newDate,amount,snapshot:snap,items:clone(snap.items||[]),saleId:original.saleId,paymentId:original.paymentId,scheduleId:original.scheduleId,status:'active',revisionOf:original.id});
+  original.revisedTo=revised.id;
+  if(original.saleId){const sale=requireRow(s,'sales',original.saleId);sale.documentId=revised.id;}
+  if(original.paymentId){const pay=requireRow(s,'payments',original.paymentId);pay.sourceDocumentId=revised.sourceKey;}
+  a={document:revised,originalId:original.id,saleId:revised.saleId,paymentId:revised.paymentId};break;}
+ case 'voidDocument':{
+  const original=requireRow(s,'documents',c.documentId);
+  text(c.reason,'無効理由');
+  if(original.paymentId)throw Error('入金がある領収書は直接無効にできません');
+  if(original.saleId){
+   const sale=requireRow(s,'sales',original.saleId);
+   if(rows(s,'payments').some(p=>active(p)&&p.saleId===sale.id))throw Error('入金を先に整理してください');
+   sale.status='void';sale.voidReason=c.reason;
+  }
+  original.status='void';original.voidReason=c.reason;a=original;break;}
  case 'registerPayment':a=payment(s,c);break;
  case 'saveSupplier':{
   const id=c.id||idFor(s,'supplier'),old=row(s,'suppliers',id);
