@@ -69,7 +69,7 @@ service cloud.firestore {
    allow get,list: if admin(company);
    allow create: if admin(company)
      && request.resource.data.keys().hasOnly(['operationId','action','actorId','companyId',
-       'targets','signature','createdAt'])
+       'targets','signature','requestHash','createdAt'])
      && request.resource.data.operationId==operationId
      && request.resource.data.companyId==company
      && request.resource.data.actorId==request.auth.uid
@@ -77,6 +77,45 @@ service cloud.firestore {
      && request.resource.data.targets is list
      && request.resource.data.targets.size()>=1 && request.resource.data.targets.size()<=10
      && request.resource.data.signature is string
+     && (!('requestHash' in request.resource.data) || (request.resource.data.requestHash is string && request.resource.data.requestHash.matches('^[0-9a-f]{64}
+   allow update,delete: if false;
+  }
+  match /companies/{company}/documentNumbers/{number} {
+   allow get,list: if admin(company);
+   allow create: if admin(company)
+     && request.resource.data.keys().hasOnly(['invoiceNo','operationId','actorId','companyId','documentId','createdAt'])
+     && request.resource.data.invoiceNo==number
+     && request.resource.data.companyId==company
+     && request.resource.data.actorId==request.auth.uid
+     && request.resource.data.createdAt==request.time
+     && operation(company,request.resource.data.operationId).targets.hasAny(['documents/'+request.resource.data.documentId])
+     && operation(company,request.resource.data.operationId).actorId==request.auth.uid;
+   allow update,delete: if false;
+  }
+  match /companies/{company}/auditLogs/{auditId} {
+   allow get,list: if admin(company);
+   allow create: if admin(company)
+     && request.resource.data.keys().hasOnly(['operationId','userId','companyId',
+       'entityType','entityId','action','before','after','timestamp'])
+     && request.resource.data.companyId==company
+     && request.resource.data.userId==request.auth.uid
+     && request.resource.data.timestamp==request.time
+     && request.resource.data.entityType is string
+     && businessCollection(request.resource.data.entityType)
+     && request.resource.data.entityId is string
+     && request.resource.data.operationId is string
+     && request.resource.data.after is map;
+   allow update,delete: if false;
+  }
+  match /companies/{company}/{name}/{recordId} {
+   allow get,list: if member(company) && businessCollection(name)
+     && (request.auth.token.role == 'admin' || staffReadable(name));
+   allow create: if admin(company) && businessCollection(name) && validCreate(company,name,recordId);
+   allow update: if admin(company) && businessCollection(name) && validUpdate(company,name,recordId);
+   allow delete: if false;
+  }
+ }
+})))
      && request.resource.data.action is string;
    allow update,delete: if false;
   }
