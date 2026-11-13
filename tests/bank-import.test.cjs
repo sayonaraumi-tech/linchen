@@ -27,7 +27,8 @@ test('Shift_JIS decoder works for Japanese bank descriptions',()=>{
 });
 test('changing a bank row under same external identity is rejected',()=>{
  let s=B.emptyState();
- s=I.importCSV(s,csv,{account:'GMO'}).state;
- const changed=csv.replace('11,000','12,000');
+ const identified='日付,摘要,入金,出金,取引番号\n2026-11-13,A,11000,,tx-1';
+ s=I.importCSV(s,identified,{account:'GMO'}).state;
+ const changed=identified.replace('11000','12000');
  assert.throws(()=>I.importCSV(s,changed,{account:'GMO'}),/取引内容|銀行明細/);
 });
