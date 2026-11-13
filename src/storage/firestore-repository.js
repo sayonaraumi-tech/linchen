@@ -48,12 +48,13 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
    if(!c.payload||typeof c.payload!=='object'||Array.isArray(c.payload))throw Error('更新内容が不正です');
    const k=c.collection+'/'+c.id;if(seen.has(k))throw Error('同じ記録を一度の操作で二重更新できません');seen.add(k);
   }
+  const signature=JSON.stringify({action,changes:changes.map(c=>({collection:c.collection,id:c.id,expectedRevision:c.expectedRevision,payload:c.payload}))});
   const operationPath=base+'/operations/'+operationId;
   return sdk.runTransaction(db,async tx=>{
    const marker=await tx.get(sdk.doc(db,operationPath));
    if(marker.exists()){
     const prev=marker.data();
-    if(prev.action!==action||prev.actorId!==user.uid||JSON.stringify(prev.targets)!==JSON.stringify(changes.map(c=>c.collection+'/'+c.id)))throw Error('操作IDの重複内容が不一致です');
+    if(prev.action!==action||prev.actorId!==user.uid||prev.signature!==signature)throw Error('操作IDの重複内容が不一致です');
     return {operationId,reused:true,targets:prev.targets};
    }
    const old=[];
@@ -71,7 +72,7 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
     tx.set(sdk.doc(db,path(c.collection,c.id)),envelope);
     tx.set(sdk.doc(db,path('auditLogs',auditId)),{operationId,userId:user.uid,companyId,entityType:c.collection,entityId:c.id,action,before:previous?.payload||null,after:structuredClone(c.payload),timestamp:now});
    }
-   tx.set(sdk.doc(db,operationPath),{operationId,action,actorId:user.uid,companyId,targets,createdAt:now});
+   tx.set(sdk.doc(db,operationPath),{operationId,action,actorId:user.uid,companyId,targets,signature,createdAt:now});
    return {operationId,reused:false,targets};
   });
  }
