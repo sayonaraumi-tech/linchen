@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function member(company) {
+   return request.auth != null && request.auth.token.companyId == company
+     && request.auth.token.role in ['admin','staff'];
+  }
+  function admin(company) {
+   return member(company) && request.auth.token.role == 'admin';
+  }
+  function businessCollection(name) {
+   return name in ['settings','customers','projects','schedule','documents','sales','payments',
+    'expenses','cashLedger','bankTransactions','suppliers','supplierTransactions','calendarLinks'];
+  }
+  function staffReadable(name) {
+   return name in ['customers','projects','schedule','documents','sales','payments','calendarLinks'];
+  }
+  function operation(company,id) {
+   return getAfter(/databases/$(database)/documents/companies/$(company)/operations/$(id)).data;
+  }
+  function audit(company,id) {
+   return getAfter(/databases/$(database)/documents/companies/$(company)/auditLogs/$(id)).data;
+  }
+  function validCommon(company,name,id) {
+   let d=request.resource.data;
+   let op=operation(company,d.lastOperationId);
+   let a=audit(company,d.lastAuditId);
+   return d.keys().hasOnly(['schemaVersion','companyId','revision','createdAt','createdBy',
+     'updatedAt','updatedBy','lastOperationId','lastAuditId','payload'])
+    && d.keys().hasAll(['schemaVersion','companyId','revision','createdAt','createdBy',
+     'updatedAt','updatedBy','lastOperationId','lastAuditId','payload'])
+    && d.schemaVersion==1 && d.companyId==company
+    && d.payload is map && d.revision is int && d.revision>0
+    && d.updatedBy==request.auth.uid && d.updatedAt==request.time
+    && op.companyId==company && op.actorId==request.auth.uid && op.createdAt==request.time
+    && op.targets.hasAny([name+'/'+id])
+    && a.userId==request.auth.uid && a.companyId==company
+    && a.operationId==d.lastOperationId && a.timestamp==request.time
+    && a.entityType==name && a.entityId==id && a.after==d.payload;
+  }
+  function validCreate(company,name,id) {
+   let d=request.resource.data;
+   return validCommon(company,name,id) && d.revision==1
+     && d.createdAt==request.time && d.createdBy==request.auth.uid
+     && audit(company,d.lastAuditId).before==null;
+  }
+  function validUpdate(company,name,id) {
+   let d=request.resource.data;
+   let old=resource.data;
+   return validCommon(company,name,id)
+     && d.revision==old.revision+1
+     && d.createdAt==old.createdAt && d.createdBy==old.createdBy
+     && d.companyId==old.companyId
+     && audit(company,d.lastAuditId).before==old.payload;
+  }
+  match /companies/{company}/operations/{operationId} {
+   allow get,list: if admin(company);
+   allow create: if admin(company)
+     && request.resource.data.keys().hasOnly(['operationId','action','actorId','companyId',
+       'targets','signature','createdAt'])
+     && request.resource.data.operationId==operationId
+     && request.resource.data.companyId==company
+     && request.resource.data.actorId==request.auth.uid
+     && request.resource.data.createdAt==request.time
+     && request.resource.data.targets is list
+     && request.resource.data.targets.size()>=1 && request.resource.data.targets.size()<=10
+     && request.resource.data.signature is string
+     && request.resource.data.action is string;
+   allow update,delete: if false;
+  }
+  match /companies/{company}/auditLogs/{auditId} {
+   allow get,list: if admin(company);
+   allow create: if admin(company)
+     && request.resource.data.keys().hasOnly(['operationId','userId','companyId',
+       'entityType','entityId','action','before','after','timestamp'])
+     && request.resource.data.companyId==company
+     && request.resource.data.userId==request.auth.uid
+     && request.resource.data.timestamp==request.time
+     && request.resource.data.entityType is string
+     && businessCollection(request.resource.data.entityType)
+     && request.resource.data.entityId is string
+     && request.resource.data.operationId is string
+     && request.resource.data.after is map;
+   allow update,delete: if false;
+  }
+  match /companies/{company}/{name}/{recordId} {
+   allow get,list: if member(company) && businessCollection(name)
+     && (request.auth.token.role == 'admin' || staffReadable(name));
+   allow create: if admin(company) && businessCollection(name) && validCreate(company,name,recordId);
+   allow update: if admin(company) && businessCollection(name) && validUpdate(company,name,recordId);
+   allow delete: if false;
+  }
+ }
+}
