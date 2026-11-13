@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {chromium}=require('playwright');
-const {serve}=require('../scripts/serve-workbench');
+const {serve}=require('../scripts/serve-workbench.cjs');
 const create=async()=>{
  const site=await serve(0),browser=await chromium.launch({headless:true});
  const context=await browser.newContext({viewport:{width:1280,height:800},acceptDownloads:true});
