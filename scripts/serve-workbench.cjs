@@ -45,6 +45,7 @@ function handler(req,res){
 function serve(port=4173,host='127.0.0.1'){
  return new Promise(resolve=>{
   const server=http.createServer(handler);
+  server.on('close',()=>{closeBrowser().catch(()=>{});});
   server.listen(port,host,()=>resolve({server,address:server.address(),url:'http://'+host+':'+server.address().port+'/app/index.html'}));
  });
 }
