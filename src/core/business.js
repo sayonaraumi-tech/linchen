@@ -116,7 +116,13 @@ function operate(s,cmd){
   a=write(s,'settings',{id:key,key,value:clone(c.value),status:'active'});break;}
  case 'saveCustomer':{
   const name=text(c.name,'顧客名'),id=c.id||idFor(s,'customer');
-  const old=row(s,'customers',id);if(old&&!active(old))throw Error('無効な顧客を直接上書きできません');a=write(s,'customers',{...old,id,name,address:c.address===undefined?old?.address||'':String(c.address),status:'active'});break;}
+  const old=row(s,'customers',id);if(old&&!active(old))throw Error('無効な顧客を直接上書きできません');
+  if(old&&old.name!==name&&(
+   rows(s,'projects').some(p=>active(p)&&p.customer===old.name)||
+   rows(s,'sales').some(p=>active(p)&&p.customer===old.name)||
+   rows(s,'documents').some(p=>active(p)&&p.customer===old.name)
+  ))throw Error('既存帳票・売上に関係する取引先名の変更には専用の訂正手続が必要です');
+  a=write(s,'customers',{...old,id,name,address:c.address===undefined?old?.address||'':String(c.address),status:'active'});break;}
  case 'saveProject':{
   const id=c.id||idFor(s,'project');
   a=write(s,'projects',{id,customer:text(c.customer,'顧客'),description:String(c.description||''),status:'active'});break;}
@@ -272,19 +278,36 @@ function operate(s,cmd){
   if(b.matchType==='supplier'){const tx=requireRow(s,'supplierTransactions',b.matchId);tx.bankTxnId='';}
   b.status='unmatched';b.matchType='';b.matchId='';a=b;break;}
  case 'voidRecord':{
-  if(!['documents','sales','payments','expenses','schedule','projects'].includes(c.collection))throw Error('取消対象外です');
+  if(!['documents','sales','payments','expenses','schedule','projects','customers'].includes(c.collection))throw Error('取消対象外です');
   const target=requireRow(s,c.collection,c.id);text(c.reason,'取消理由');
   if(c.collection==='sales'&&totalPayments(s,target.id)>0)throw Error('入金がある売上は先に入金を整理してください');
   if(c.collection==='payments'&&target.bankTxnId)throw Error('銀行照合を先に解除してください');
+  if(c.collection==='expenses'&&target.bankTxnId)throw Error('銀行照合済支出は照合解除してから取消してください');
+  if(c.collection==='customers'&&(
+   rows(s,'projects').some(p=>active(p)&&p.customer===target.name)||
+   rows(s,'sales').some(p=>active(p)&&p.customer===target.name)||
+   rows(s,'documents').some(p=>active(p)&&p.customer===target.name)
+  ))throw Error('関連する帳票・売上・案件のある取引先は直接取消できません');
   if(c.collection==='payments'&&rows(s,'documents').some(d=>d.paymentId===target.id&&active(d)))throw Error('領収書と関連する入金は先に専用訂正処理が必要です');
   if(c.collection==='documents'&&(target.saleId||target.paymentId))throw Error('売上・入金と関連する正式帳票は専用の訂正・取消処理が必要です');
   if(c.collection==='sales'&&rows(s,'documents').some(d=>active(d)&&d.saleId===target.id))throw Error('発行済帳票と関連する売上は直接取消できません');
   if(c.collection==='schedule'&&target.registeredSaleId)throw Error('売上登録済みの予定は直接削除できません');
+  if(c.collection==='projects'&&rows(s,'schedule').some(e=>active(e)&&e.projectId===target.id))throw Error('紐付け予定がある案件は直接取消できません');
   if(c.collection==='schedule'&&rows(s,'documents').some(d=>active(d)&&d.scheduleId===target.id))throw Error('発行済帳票に関連する予定は直接取消できません');
   target.status='void';target.voidReason=c.reason;
   if(c.collection==='payments')mirrorCash(s,'payments',target);
   if(c.collection==='expenses')mirrorCash(s,'expenses',target);
   a=target;break;}
+ case 'restoreRecord':{
+  if(!['customers','schedule','expenses'].includes(c.collection))throw Error('復元できない記録です');
+  const target=row(s,c.collection,c.id);
+  if(!target||target.status!=='void')throw Error('取消済みの対象が必要です');
+  if(!c.confirmRestore)throw Error('復元の明示確認が必要です');
+  if(c.collection==='expenses'&&target.bankTxnId)throw Error('銀行照合済み支出は復元できません');
+  target.status='active';delete target.voidReason;
+  if(c.collection==='expenses')mirrorCash(s,'expenses',target);
+  a=target;break;
+ }
  case 'deleteTestRecord':{
   if(s.scope!=='test')throw Error('正式データを物理削除できません');
   if(!c.confirmTestDeletion)throw Error('テスト削除を明示確認してください');
