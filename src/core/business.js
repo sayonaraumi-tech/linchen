@@ -344,7 +344,9 @@ function operate(s,cmd){
    ledger.deletedAt='void';
   }
   tx.status='void';tx.voidReason=reason;
-  a={transaction:tx,balance:supplierBalance(s,tx.supplierId)};
+  const remaining=supplierBalance(s,tx.supplierId);
+  if(remaining<0)throw Error('前渡金を使用済みのため元の前払取消で残高がマイナスになります。月次請求を先に訂正してください');
+  a={transaction:tx,balance:remaining};
   break;
  }
  case 'saveExpense':{
