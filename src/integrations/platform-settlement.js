@@ -21,8 +21,11 @@ const money=(x,k)=>x===undefined||x===null?null:positiveInt(x,k);
 const createResult=(provider,period)=>({provider,period,mode:provider==='np'?'monthly-auto-debit':'monthly-bank-payout',readOnly:true,accountingWrites:0,issues:[]});
 function bankRows(rows,{account,direction}){
  if(!Array.isArray(rows))throw Error('銀行証拠の形式が不正です');
+ const seen=new Set();
  return rows.map((r,i)=>{
   if(!r||!r.id)throw Error('銀行明細IDがありません: '+(i+1));
+  if(seen.has(String(r.id)))throw Error('同じ銀行明細が二重に含まれています: '+r.id);
+  seen.add(String(r.id));
   if(r.account!==account||r.direction!==direction)throw Error('異なる口座または入出金方向が含まれます');
   return {id:String(r.id),amount:positiveInt(r.amount,'銀行金額'),date:String(r.date||'')};
  });
