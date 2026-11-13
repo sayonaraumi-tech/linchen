@@ -86,9 +86,9 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
     tx.set(sdk.doc(db,path('auditLogs',auditId)),{operationId,userId:user.uid,companyId,entityType:c.collection,entityId:c.id,action,before:previous?.payload||null,after:structuredClone(c.payload),timestamp:now});
    }
    for(const c of numberClaims){tx.set(sdk.doc(db,base+'/documentNumbers/'+c.payload.invoiceNo),{invoiceNo:c.payload.invoiceNo,operationId,actorId:user.uid,companyId,documentId:c.id,createdAt:now});}
-   const marker={operationId,action,actorId:user.uid,companyId,targets,signature,createdAt:now};
-   if(requestHash!==null)marker.requestHash=requestHash;
-   tx.set(sdk.doc(db,operationPath),marker);
+   const operationMarker={operationId,action,actorId:user.uid,companyId,targets,signature,createdAt:now};
+   if(requestHash!==null)operationMarker.requestHash=requestHash;
+   tx.set(sdk.doc(db,operationPath),operationMarker);
    return {operationId,reused:false,targets};
   });
  }
