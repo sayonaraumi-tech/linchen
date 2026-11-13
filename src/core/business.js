@@ -164,9 +164,11 @@ function operate(s,cmd){
   a={document:revised,originalId:original.id,saleId:revised.saleId,paymentId:revised.paymentId};break;}
  case 'voidDocument':{
   const original=requireRow(s,'documents',c.documentId);
+  if(original.status!=='active')throw Error('現在有効な帳票以外は無効処理できません');
   text(c.reason,'無効理由');
   if(original.paymentId)throw Error('入金がある領収書は直接無効にできません');
   if(original.saleId){
+   if(rows(s,'documents').some(d=>d.id!==original.id&&d.saleId===original.saleId&&d.status==='active'))throw Error('同じ売上を参照する別の有効帳票があるため直接無効にできません');
    const sale=requireRow(s,'sales',original.saleId);
    if(rows(s,'payments').some(p=>active(p)&&p.saleId===sale.id))throw Error('入金を先に整理してください');
    sale.status='void';sale.voidReason=c.reason;
