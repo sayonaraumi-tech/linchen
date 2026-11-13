@@ -43,3 +43,15 @@ test('admin cannot delete protected business records',async()=>{
  const {ctx}=context('admin','admin');
  await assertFails(sdk.deleteDoc(sdk.doc(ctx.firestore(),'companies/tsukinowa/customers/rulecustomer')));
 });
+
+test('formal number has atomic unique reservation and original snapshot cannot be overwritten',async()=>{
+ const {repo}=context('admin','admin');
+ const no='20261113-1315-01';
+ const docPayload={docType:'invoice',invoiceNo:no,snapshot:{invoiceNo:no,customerName:'A'},status:'active'};
+ const command={operationId:'number-test-a',action:'issueDocument',changes:[{collection:'documents',id:'documentA',expectedRevision:0,payload:docPayload}]};
+ assert.equal((await repo.apply(command)).reused,false);
+ assert.equal((await repo.apply(command)).reused,true);
+ await assert.rejects(repo.apply({operationId:'number-test-b',action:'issueDocument',changes:[{collection:'documents',id:'documentB',expectedRevision:0,payload:docPayload}]}),/帳票番号/);
+ await assert.rejects(repo.apply({operationId:'number-test-c',action:'reviseInPlace',changes:[{collection:'documents',id:'documentA',expectedRevision:1,payload:{...docPayload,snapshot:{invoiceNo:no,customerName:'不正変更'}}}]}));
+ assert.equal((await repo.read('documents','documentA')).payload.snapshot.customerName,'A');
+});
