@@ -55,3 +55,33 @@ test('formal number has atomic unique reservation and original snapshot cannot b
  await assert.rejects(repo.apply({operationId:'number-test-c',action:'reviseInPlace',changes:[{collection:'documents',id:'documentA',expectedRevision:1,payload:{...docPayload,snapshot:{invoiceNo:no,customerName:'不正変更'}}}]}));
  assert.equal((await repo.read('documents','documentA')).payload.snapshot.customerName,'A');
 });
+
+test('real Firestore domain service atomically creates invoice and cash receipt with no duplicate sale',async()=>{
+ const {repo}=context('admin','admin');
+ const {createCommandService}=require('../src/services/command-service');
+ const service=createCommandService({repository:repo,maximumChanges:6});
+ const invoice={operationId:'domain-invoice-test',type:'issueDocument',docType:'invoice',
+   sourceKey:'domain-invoice-test',issuedAt:'2026-11-13T04:16:00Z',amount:11000,
+   snapshot:{customerName:'合成テスト顧客',invoiceDate:'2026-11-13',items:[{content:'壁紙',qty:1,price:10000}]}};
+ const first=await service.execute(invoice);
+ assert.equal(first.reused,false);assert.equal(first.changes,3);
+ assert.equal((await service.execute(invoice)).reused,true);
+ const sales=await repo.list('sales');assert.equal(sales.length,1);
+ const documentRows=(await repo.list('documents')).filter(x=>x.payload.sourceKey==='domain-invoice-test');
+ assert.equal(documentRows.length,1);
+ assert.equal(documentRows[0].payload.invoiceNo,'20261113-1316-01');
+ const receipt={operationId:'domain-receipt-test',type:'issueDocument',docType:'receipt',
+   sourceKey:'domain-receipt-test',issuedAt:'2026-11-13T04:17:00Z',
+   snapshot:{customerName:'現金テスト顧客',invoiceDate:'2026-11-13',receiptTotal:12000,paymentMethod:'現金'}};
+ const paid=await service.execute(receipt);assert.equal(paid.reused,false);
+ assert.equal(paid.changes,5);
+ const cashReceipts=(await repo.list('sales')).filter(x=>x.payload.sourceId.startsWith('receipt:'));
+ assert.equal(cashReceipts.length,1);
+ const payments=await repo.list('payments');
+ assert.equal(payments.length,1);assert.equal(payments[0].payload.confirmation,'cash-received');
+ const ledger=await repo.list('cashLedger');
+ assert.equal(ledger.length,1);
+ assert.equal(ledger[0].payload.sourceId,payments[0].id);
+ assert.equal((await service.execute(receipt)).reused,true);
+ assert.equal((await repo.list('cashLedger')).length,1);
+});
