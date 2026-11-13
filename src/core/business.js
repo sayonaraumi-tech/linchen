@@ -45,7 +45,7 @@ function mirrorCash(s,sourceType,source){
 }
 function supplierBalance(s,supplierId){
  const supplier=requireRow(s,'suppliers',supplierId);let total=supplier.openingBalance||0;
- for(const tx of rows(s,'supplierTransactions').filter(x=>active(x)&&x.supplierId===supplierId))total+=(tx.type==='monthlyInvoice'?-1:1)*tx.amount;
+ for(const tx of rows(s,'supplierTransactions').filter(x=>active(x)&&x.supplierId===supplierId))total+=tx.type==='monthlyInvoice'?-(tx.deductionAmount===undefined?tx.amount:tx.deductionAmount):tx.amount;
  return total;
 }
 function payment(s,input){
@@ -260,6 +260,37 @@ function operate(s,cmd){
   const id=c.id||idFor(s,'supplier'),old=row(s,'suppliers',id);
   if(old&&c.openingBalance!==undefined&&signedYen(c.openingBalance)!==old.openingBalance&&rows(s,'supplierTransactions').some(x=>active(x)&&x.supplierId===id))throw Error('取引後の期首残高変更は訂正処理が必要です');
   a=write(s,'suppliers',{...old,id,name:text(c.name,'仕入先名'),openingBalance:old?.openingBalance??signedYen(c.openingBalance||0),status:'active'});break;}
+ case 'settleSupplierInvoice':{
+  if(c.reviewed!==true)throw Error('公式請求書と前渡控除額の確認が必要です');
+  const supplier=requireRow(s,'suppliers',c.supplierId);
+  const month=text(c.invoiceMonth,'請求月');
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw Error('請求月が不正です');
+  const invoiceNo=text(c.invoiceNo,'請求書番号');
+  const amount=yen(c.amount),deductionAmount=yen(c.deductionAmount);
+  if(!amount||deductionAmount>amount)throw Error('請求額・前渡控除額を確認してください');
+  const day=date(c.date,'請求日'),sourceHash=String(c.sourceHash||'').trim();
+  if(sourceHash&&!/^[0-9a-f]{64}$/.test(sourceHash))throw Error('請求書PDFハッシュを確認してください');
+  const id='monthly_'+supplier.id+'_'+month;
+  const existing=row(s,'supplierTransactions',id);
+  if(existing){
+   if(!active(existing)||existing.invoiceNo!==invoiceNo||existing.amount!==amount||
+     existing.deductionAmount!==deductionAmount||existing.date!==day||existing.sourceHash!==sourceHash)
+     throw Error('既存請求と異なります。専用訂正処理が必要です');
+   a={transaction:existing,reused:true,balance:supplierBalance(s,supplier.id)};break;
+  }
+  if(rows(s,'supplierTransactions').some(tx=>tx.supplierId===supplier.id&&
+    (tx.invoiceNo===invoiceNo||(sourceHash&&tx.sourceHash===sourceHash))))
+   throw Error('同じ請求番号またはPDFがすでに登録されています');
+  if(deductionAmount>Math.max(0,supplierBalance(s,supplier.id)))throw Error('前渡控除額が未使用残高を超えています');
+  const description=text(c.description,'材料購入内容');
+  const transaction=write(s,'supplierTransactions',{id,supplierId:supplier.id,date:day,
+   type:'monthlyInvoice',amount,deductionAmount,invoiceMonth:month,invoiceNo,
+   sourceHash,description,paymentMethod:'月締',bankTxnId:'',status:'active'});
+  write(s,'expenses',{id:'expense_'+id,expenseDate:day,vendor:supplier.name,
+   description,category:'材料費',amount,paymentMethod:'仕入先請求',
+   supplierTransactionId:id,bankTxnId:'',status:'active'});
+  a={transaction,balance:supplierBalance(s,supplier.id),payable:amount-deductionAmount,reused:false};break;
+ }
  case 'recordSupplierTransaction':{
   const supplier=requireRow(s,'suppliers',c.supplierId);
   if(!['prepayment','payment','monthlyInvoice'].includes(c.transactionType))throw Error('仕入先取引区分が不正です');
