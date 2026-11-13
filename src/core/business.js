@@ -137,7 +137,8 @@ function operate(s,cmd){
   const target=requireRow(s,c.collection,c.id);text(c.reason,'取消理由');
   if(c.collection==='sales'&&totalPayments(s,target.id)>0)throw Error('入金がある売上は先に入金を整理してください');
   if(c.collection==='payments'&&target.bankTxnId)throw Error('銀行照合を先に解除してください');
-  if(c.collection==='documents'&&target.paymentId)throw Error('入金済帳票は訂正・取消フローで処理してください');
+  if(c.collection==='documents'&&(target.saleId||target.paymentId))throw Error('売上・入金と関連する正式帳票は専用の訂正・取消処理が必要です');
+  if(c.collection==='sales'&&rows(s,'documents').some(d=>active(d)&&d.saleId===target.id))throw Error('発行済帳票と関連する売上は直接取消できません');
   if(c.collection==='schedule'&&target.registeredSaleId)throw Error('売上登録済みの予定は直接削除できません');
   target.status='void';target.voidReason=c.reason;
   if(c.collection==='payments')mirrorCash(s,'payments',target);
@@ -151,7 +152,9 @@ function operate(s,cmd){
   const related={sales:()=>rows(s,'payments').some(p=>active(p)&&p.saleId===target.id),
     payments:()=>rows(s,'cashLedger').some(p=>active(p)&&p.sourceId===target.id),
     expenses:()=>rows(s,'cashLedger').some(p=>active(p)&&p.sourceId===target.id),
-    documents:()=>rows(s,'sales').some(p=>active(p)&&p.documentId===target.id),
+    documents:()=>rows(s,'sales').some(p=>active(p)&&p.documentId===target.id)||rows(s,'payments').some(p=>active(p)&&p.sourceDocumentId===target.sourceKey),
+    projects:()=>rows(s,'schedule').some(p=>active(p)&&p.projectId===target.id),
+    customers:()=>rows(s,'projects').some(p=>active(p)&&p.customer===target.name),
     schedule:()=>rows(s,'sales').some(p=>active(p)&&p.scheduleId===target.id),
     bankTransactions:()=>target.status==='matched'};
   if(related[c.collection]?.())throw Error('関連記録が存在するため先に関連を解除してください');
