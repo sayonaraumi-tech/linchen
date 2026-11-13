@@ -79,3 +79,20 @@ test('same operation ID with different payload is not silently accepted as the f
  await assert.rejects(svc.execute(cmd('shared-op','saveProject',{customer:'B'})),/依頼内容が一致しません/);
  assert.equal([...repo.data].filter(([k])=>k.startsWith('projects/')).length,1);
 });
+
+test('command service refuses unbounded legacy row scans before any Firestore mutation',async()=>{
+ const {createCommandService}=require('../src/services/command-service');
+ let commits=0;
+ const repo={
+  read:async()=>null,
+  list:async collection=>collection==='customers'?Array.from({length:5},(_,i)=>({
+   id:'customer_'+i,revision:1,payload:{id:'customer_'+i,name:'合成顧客'+i,status:'active'}
+  })):[],
+  readOperation:async()=>null,
+  identity:async()=>({uid:'isolated-test'}),
+  apply:async()=>{commits++;throw Error('Must not commit');}
+ };
+ const svc=createCommandService({repository:repo,maximumRecords:3});
+ await assert.rejects(svc.execute({type:'saveCustomer',operationId:'bounded',name:'新規'}),/大量履歴データ/);
+ assert.equal(commits,0);
+});
