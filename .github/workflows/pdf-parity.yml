@@ -5,6 +5,9 @@ on:
     paths:
       - 'legacy-pdf/**'
       - 'tests/legacy-pdf-real.cjs'
+      - 'tests/business-pdf-integration.cjs'
+      - 'src/core/business.js'
+      - 'src/core/document-numbering.js'
       - '.github/workflows/pdf-parity.yml'
 permissions:
   contents: read
@@ -48,10 +51,18 @@ jobs:
           NEW_ROOT: legacy-pdf/source
           PDF_OUT: pdf-evidence
         run: node tests/legacy-pdf-real.cjs
+      - name: Real new-business documents through original PDF renderer
+        env:
+          OLD_ROOT: _original
+          NEW_ROOT: legacy-pdf/source
+          INTEGRATION_PDF_OUT: pdf-business-evidence
+        run: node tests/business-pdf-integration.cjs
       - name: Preserve PDF evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: four-document-pdf-parity
-          path: pdf-evidence/
+          path: |
+            pdf-evidence/
+            pdf-business-evidence/
           if-no-files-found: warn
