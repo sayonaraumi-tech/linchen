@@ -37,3 +37,37 @@ test('ETag conflict returns explicit review instead of retrying destructive over
  const r=await C.patchLinkedEvent({calendarId:'c',eventId:'e',etag:'old',description:'abc',summary:'修正',provider:{patch:async()=>{const e=new Error('Precondition Failed');e.status=412;throw e;}}});
  assert.equal(r.status,'conflict');assert.equal(r.requiresReview,true);
 });
+
+test('internal schedule Google create and later update are optional and preserve the local record',async()=>{
+ let s=B.emptyState();s=B.perform(s,{operationId:'local1',type:'saveSchedule',date:'2026-11-16',title:'内装工事',customer:'A'}).state;
+ const original=B.list(s,'schedule')[0],calls=[];
+ const api={
+  insert:async arg=>{calls.push('insert');return {id:arg.id,etag:'v1',updated:'2026-11-13T00:00:00Z'};},
+  patch:async arg=>{calls.push('patch');return {id:arg.eventId,etag:'v2',updated:'2026-11-14T00:00:00Z'};},
+  get:async()=>null,
+ };
+ const first=await C.pushInternalEvent({schedule:original,calendarId:'test-calendar',provider:api,digest:hash});
+ assert.equal(first.status,'synced');assert.equal(calls.length,1);
+ assert.equal(B.list(s,'schedule')[0].googleEventId,''); // local state unmodified by Google
+ s=B.perform(s,first.command).state;
+ const linked=B.list(s,'schedule')[0];
+ assert.equal(linked.googleEventId,first.eventId);
+ const second=await C.pushInternalEvent({schedule:linked,calendarId:'test-calendar',provider:api,digest:hash});
+ assert.equal(second.status,'synced');assert.deepEqual(calls,['insert','patch']);
+ s=B.perform(s,second.command).state;
+ assert.equal(B.list(s,'schedule').length,1);assert.equal(B.list(s,'schedule')[0].customer,'A');
+});
+test('Google connection outage does not destroy an internal schedule',async()=>{
+ let s=B.emptyState();s=B.perform(s,{operationId:'local2',type:'saveSchedule',date:'2026-11-16',title:'クロス工事'}).state;
+ const before=JSON.stringify(s);
+ const result=await C.pushInternalEvent({schedule:B.list(s,'schedule')[0],calendarId:'test-calendar',digest:hash,
+  provider:{insert:async()=>{throw new Error('offline')},patch:async()=>{},get:async()=>{}}});
+ assert.equal(result.status,'pending');assert.equal(result.retryable,true);
+ assert.equal(JSON.stringify(s),before);
+});
+test('Google create conflict resolves only matching deterministic event',async()=>{
+ let s=B.emptyState();s=B.perform(s,{operationId:'local3',type:'saveSchedule',date:'2026-11-16',title:'クロス工事'}).state;
+ const api={insert:async()=>{let e=new Error('already exists');e.status=409;throw e;},patch:async()=>{},get:async({eventId})=>({id:eventId,etag:'already'})};
+ const r=await C.pushInternalEvent({schedule:B.list(s,'schedule')[0],calendarId:'test-calendar',provider:api,digest:hash});
+ assert.equal(r.status,'synced');assert.equal(r.googleEtag,'already');
+});
