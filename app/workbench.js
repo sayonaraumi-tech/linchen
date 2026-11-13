@@ -14,7 +14,7 @@ const esc=x=>String(x??'').replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&
 const amount=x=>Number(x||0).toLocaleString('ja-JP')+' 円';
 const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const field=(name,label,type='text',value='',required=true)=>'<label>'+esc(label)+'<input name="'+esc(name)+'" type="'+esc(type)+'" value="'+esc(value)+'" '+(required?'required':'')+'></label>';
-const select=(name,label,options)=>'<label>'+esc(label)+'<select name="'+esc(name)+'">'+options.map(([v,t])=>'<option value="'+esc(v)+'">'+esc(t)+'</option>').join('')+'</select></label>';
+const select=(name,label,options,chosen)=>'<label>'+esc(label)+'<select name="'+esc(name)+'">'+options.map(([v,t])=>'<option value="'+esc(v)+'"'+(chosen===v?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select></label>';
 function form(id,inputs,label){return '<form data-action="'+esc(id)+'">'+inputs+'<button type="submit">'+esc(label)+'</button></form>';}
 function grid(head,rows){return '<div class="table-scroller"><table><thead><tr>'+head.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';}
 const td=values=>'<tr>'+values.map(x=>'<td>'+esc(x)+'</td>').join('')+'</tr>';
@@ -78,7 +78,7 @@ function expenses(){
  const edit=list('expenses').find(x=>x.id===editing.expense&&x.status==='active');
  const input=field('expenseDate','支出日','date',edit?.expenseDate||today())+field('vendor','支払先','text',edit?.vendor||'')+
  field('category','勘定科目','text',edit?.category||'材料費')+field('amount','金額','number',edit?.amount||1000)+
- select('paymentMethod','支払方法',[['現金','現金'],['銀行振込','銀行振込'],['法人信用カード','法人信用カード']]);
+ select('paymentMethod','支払方法',[['現金','現金'],['銀行振込','銀行振込'],['法人信用カード','法人信用カード']],edit?.paymentMethod);
  const expenses=list('expenses');
  const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(e.status)+'</td><td>'+(e.status==='active'?button('expense-edit',e.id,'編集')+' '+button('expense-void',e.id,'取消'):button('expense-restore',e.id,'復元'))+' '+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
  const cash=list('cashLedger').filter(e=>!e.deletedAt);
