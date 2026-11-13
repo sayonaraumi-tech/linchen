@@ -5,10 +5,11 @@ function fakeRepo(){
  const cp=x=>JSON.parse(JSON.stringify(x));
  return {
   data:collections,markers,
+  async identity(){return {uid:'test-admin',role:'admin'};},
   async read(name,id){return cp(collections.get(name+'/'+id)||null)},
   async list(name){return [...collections].filter(([k])=>k.startsWith(name+'/')).map(([key,record])=>({id:key.split('/').at(-1),...cp(record)}));},
   async readOperation(id){return cp(markers.get(id)||null)},
-  async apply({operationId,action,changes}){
+  async apply({operationId,action,changes,requestHash}){
    if(markers.has(operationId))return {reused:true,targets:markers.get(operationId).targets};
    for(const c of changes){
     const old=collections.get(c.collection+'/'+c.id);
@@ -16,7 +17,7 @@ function fakeRepo(){
    }
    const targets=changes.map(c=>c.collection+'/'+c.id);
    for(const c of changes)collections.set(c.collection+'/'+c.id,{revision:c.expectedRevision+1,payload:cp(c.payload)});
-   markers.set(operationId,{action,targets});
+   markers.set(operationId,{action,targets,requestHash,actorId:'test-admin'});
    return {operationId,reused:false,targets};
   }
  };
@@ -70,4 +71,11 @@ test('operation fails entirely on stale meta revision after another write',async
 test('test deletion does not delete Firestore records',async()=>{
  const svc=createCommandService({repository:fakeRepo()});
  await assert.rejects(svc.execute(cmd('delete','deleteTestRecord',{collection:'projects',id:'x',confirmTestDeletion:true})),/テスト/);
+});
+
+test('same operation ID with different payload is not silently accepted as the first transaction',async()=>{
+ const repo=fakeRepo(),svc=createCommandService({repository:repo});
+ await svc.execute(cmd('shared-op','saveProject',{customer:'A'}));
+ await assert.rejects(svc.execute(cmd('shared-op','saveProject',{customer:'B'})),/依頼内容が一致しません/);
+ assert.equal([...repo.data].filter(([k])=>k.startsWith('projects/')).length,1);
 });
