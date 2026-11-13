@@ -52,3 +52,21 @@ test('linked supplier cash or bank transaction cannot be cancelled before eviden
  assert.equal(B.getOverview(s).cashOut,0);
  assert.equal(B.list(s,'cashLedger').length,1);
 });
+
+test('already deducted supplier advance cannot be cancelled while the monthly invoice remains active',()=>{
+ let s=B.emptyState();
+ s=run(s,'supplier',{type:'saveSupplier',name:'東鵬テスト',openingBalance:0});
+ const supplier=B.list(s,'suppliers')[0];
+ s=run(s,'prepay',{type:'recordSupplierTransaction',supplierId:supplier.id,transactionType:'prepayment',amount:1000000,date:'2026-10-01',paymentMethod:'銀行振込'});
+ const tx=B.list(s,'supplierTransactions').find(x=>x.type==='prepayment');
+ s=run(s,'invoice',{type:'settleSupplierInvoice',supplierId:supplier.id,invoiceMonth:'2026-10',invoiceNo:'D202610',
+  amount:500000,deductionAmount:500000,date:'2026-10-31',description:'月次材料',reviewed:true});
+ const before=JSON.stringify(s);
+ assert.throws(()=>run(s,'void-prepay',{type:'voidSupplierTransaction',transactionId:tx.id,reason:'取り消し'}),/残高がマイナス/);
+ assert.equal(JSON.stringify(s),before);
+ const invoice=B.list(s,'supplierTransactions').find(x=>x.type==='monthlyInvoice');
+ s=run(s,'void-invoice',{type:'voidSupplierTransaction',transactionId:invoice.id,reason:'請求取消'});
+ s=run(s,'void-prepay-again',{type:'voidSupplierTransaction',transactionId:tx.id,reason:'前渡訂正'});
+ assert.equal(B.supplierBalance(s,supplier.id),0);
+ assert.equal(B.getOverview(s).expenses,0);
+});
