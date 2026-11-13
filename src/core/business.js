@@ -130,6 +130,45 @@ function operate(s,cmd){
   if(ev.registeredSaleId){a=requireRow(s,'sales',ev.registeredSaleId);break;}
   a=registerSale(s,'schedule:'+ev.id,{customer:ev.customer||ev.title,amount:c.amount,salesDate:c.salesDate||ev.date,description:ev.description,scheduleId:ev.id});
   ev.registeredSaleId=a.id;break;}
+ case 'convertEstimateToInvoice':{
+  const estimate=requireRow(s,'documents',c.estimateId);
+  if(estimate.docType!=='estimate'||estimate.status!=='active')throw Error('有効な見積書を選択してください');
+  const existing=rows(s,'documents').find(d=>d.docType==='invoice'&&d.estimateId===estimate.id);
+  if(existing){
+   if(!active(existing))throw Error('変換済請求書は無効です。訂正手続が必要です');
+   a={document:existing,saleId:existing.saleId,estimateId:estimate.id,reused:true};break;
+  }
+  const snap=clone(estimate.snapshot);
+  delete snap.invoiceNo;
+  snap.invoiceDate=date(c.invoiceDate||estimate.issueDate,'請求発行日');
+  snap.docType='invoice';
+  const originalAmount=yen(estimate.amount);
+  a=issue(s,{docType:'invoice',snapshot:snap,amount:originalAmount,
+   sourceKey:'converted-estimate:'+estimate.id,
+   scheduleId:c.scheduleId||estimate.scheduleId||'',salesDate:c.salesDate||snap.invoiceDate,issuedAt:c.issuedAt});
+  a.document.estimateId=estimate.id;
+  estimate.convertedInvoiceId=a.document.id;
+  break;
+ }
+ case 'issueReceiptForPayment':{
+  const pay=requireRow(s,'payments',c.paymentId);
+  if(![CASH,BANK_CONFIRMED].includes(pay.confirmation))throw Error('銀行未照合の入金には領収書を発行できません');
+  const sale=requireRow(s,'sales',pay.saleId);
+  const existing=rows(s,'documents').find(d=>d.docType==='receipt'&&d.paymentId===pay.id);
+  if(existing){
+   if(!active(existing))throw Error('無効な領収書は再発行できません');
+   a={document:existing,saleId:sale.id,paymentId:pay.id,reused:true};break;
+  }
+  const invoice=rows(s,'documents').find(d=>active(d)&&d.saleId===sale.id&&(d.docType==='invoice'||d.docType==='onoda'));
+  const snap={customerName:invoice?.customer||sale.customer,invoiceDate:pay.paymentDate,
+   docType:'receipt',receiptTotal:pay.amount,paymentMethod:pay.method,
+   tadashi:c.tadashi||sale.description||'工事代金',items:clone(invoice?.items||[]),
+   linkedInvoiceId:invoice?.id||''};
+  a=issue(s,{docType:'receipt',snapshot:snap,saleId:sale.id,paymentId:pay.id,
+   sourceKey:'payment-receipt:'+pay.id,issuedAt:c.issuedAt});
+  a.document.linkedInvoiceId=invoice?.id||'';
+  break;
+ }
  case 'issueDocument':a=issue(s,c);break;
  case 'reviseDocument':{
   const original=requireRow(s,'documents',c.documentId),reason=text(c.reason,'訂正理由');
@@ -201,6 +240,7 @@ function operate(s,cmd){
   const id=c.id||idFor(s,'exp'),old=row(s,'expenses',id);
   if(old?.bankTxnId)throw Error('銀行照合を解除してから支出を訂正してください');
   if(old?.supplierTransactionId)throw Error('仕入先請求に連動する支出は仕入先台帳から訂正してください');
+  if(old&&!active(old))throw Error('取消済支出は通常保存で復活できません');
   a=write(s,'expenses',{...old,id,expenseDate:date(c.expenseDate,'支出日'),vendor:text(c.vendor,'取引先'),description:String(c.description||''),category:text(c.category,'科目'),amount,paymentMethod:text(c.paymentMethod,'支払方法'),bankTxnId:'',status:'active'});
   mirrorCash(s,'expenses',a);break;}
  case 'importBankTransaction':{
@@ -236,9 +276,11 @@ function operate(s,cmd){
   const target=requireRow(s,c.collection,c.id);text(c.reason,'取消理由');
   if(c.collection==='sales'&&totalPayments(s,target.id)>0)throw Error('入金がある売上は先に入金を整理してください');
   if(c.collection==='payments'&&target.bankTxnId)throw Error('銀行照合を先に解除してください');
+  if(c.collection==='payments'&&rows(s,'documents').some(d=>d.paymentId===target.id&&active(d)))throw Error('領収書と関連する入金は先に専用訂正処理が必要です');
   if(c.collection==='documents'&&(target.saleId||target.paymentId))throw Error('売上・入金と関連する正式帳票は専用の訂正・取消処理が必要です');
   if(c.collection==='sales'&&rows(s,'documents').some(d=>active(d)&&d.saleId===target.id))throw Error('発行済帳票と関連する売上は直接取消できません');
   if(c.collection==='schedule'&&target.registeredSaleId)throw Error('売上登録済みの予定は直接削除できません');
+  if(c.collection==='schedule'&&rows(s,'documents').some(d=>active(d)&&d.scheduleId===target.id))throw Error('発行済帳票に関連する予定は直接取消できません');
   target.status='void';target.voidReason=c.reason;
   if(c.collection==='payments')mirrorCash(s,'payments',target);
   if(c.collection==='expenses')mirrorCash(s,'expenses',target);
