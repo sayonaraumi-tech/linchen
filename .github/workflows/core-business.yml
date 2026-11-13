@@ -1,0 +1,17 @@
+name: Independent business core
+on:
+  push:
+    branches: [develop/tsukinowa-construction]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Core accounting regression
+        run: node --test tests/core-business.test.cjs
