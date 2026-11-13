@@ -41,7 +41,7 @@ function schedule(){
 function documents(){
  const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],['onoda','小野田']])+
  field('customerName','宛名')+field('invoiceDate','発行日','date',today())+
- field('amount','税込金額','number','11000')+field('description','工事内容','text','壁紙補修')+
+ field('amount','入力金額（見積・請求=税抜、領収=受領税込）','number','10000')+field('description','工事内容','text','壁紙補修')+
  select('paymentMethod','受領方法',[['現金','現金'],['銀行振込','銀行振込']]);
  return page('帳票','この画面は帳票レコードの保存動作を検証します。PDFの原版レイアウト・実際の印刷機能は別のPDFテストで検証します。',
  form('document',inputs,'帳票を正式保存')+
@@ -109,7 +109,8 @@ async function submit(form){
  case 'document':{
   const type=val(data,'docType'),amountValue=Number(val(data,'amount'));
   const customer=val(data,'customerName'),date=val(data,'invoiceDate'),description=val(data,'description');
-  command={type:'issueDocument',docType:type,sourceKey:'test_'+operationId(),amount:amountValue,
+  const gross=type==='receipt'?amountValue:amountValue+Math.round(amountValue*0.1);
+  command={type:'issueDocument',docType:type,sourceKey:'test_'+operationId(),amount:gross,
    snapshot:{customerName:customer,invoiceDate:date,items:[{content:description,qty:1,price:amountValue,taxable:true,unit:'式'}],
     receiptTotal:amountValue,paymentMethod:val(data,'paymentMethod'),tadashi:description,carryoverAmount:0}};
   break;
