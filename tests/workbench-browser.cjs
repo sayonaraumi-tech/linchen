@@ -287,3 +287,23 @@ test('saved historical document re-downloads real frozen PDF without changing ac
   assert.equal(after,before,'PDF download must be read only');
  }finally{await app.close();}
 });
+
+test('editing a bank-paid expense never silently changes it into cash',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'支出・現金',exact:true}).click();
+  await app.page.locator('[name=vendor]').fill('銀行支払先');
+  await app.page.locator('[name=amount]').fill('3000');
+  await app.page.locator('[name=paymentMethod]').selectOption('銀行振込');
+  await app.page.getByRole('button',{name:'支出登録'}).click();
+  await app.page.getByRole('button',{name:'編集'}).click();
+  assert.equal(await app.page.locator('[name=paymentMethod]').inputValue(),'銀行振込');
+  await app.page.locator('[name=amount]').fill('3500');
+  await app.page.getByRole('button',{name:'支出を変更'}).click();
+  const data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.values(data.collections.expenses)[0].amount,3500);
+  assert.equal(Object.values(data.collections.expenses)[0].paymentMethod,'銀行振込');
+  assert.equal(Object.keys(data.collections.cashLedger).length,0);
+ }finally{await app.close();}
+});
