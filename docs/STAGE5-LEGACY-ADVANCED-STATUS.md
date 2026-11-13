@@ -60,3 +60,33 @@
 - Firestore Emulator 测试已加入 `acceptEstimate` 和 `settleSupplierInvoice` 的完整原子事务及重试用例。
 - 最近结果：核心业务 **142/142** 通过（https://github.com/sayonaraumi-tech/linchen/actions/runs/43416178562）；Firestore Emulator **9/9** 通过（https://github.com/sayonaraumi-tech/linchen/actions/runs/43416172444）。
 - **仍不满足正式上线或第6阶段 UI 准入**：全量历史实物、旧所有高风险命令、云端安全业务校验/恢复及 PDF 非确定性仍有缺口。
+
+## 7. 继续执行：安全恢复、Google 冲突、生产写入阻断、PDF稳定性（本轮）
+
+### 已执行并有证据
+
+- `src/storage/backup-restore.js`：隔离离线快照 SHA-256、数据字段及公司校验、财务总额核对、操作 journal 一致性、拒绝覆盖有记录的测试账本、仅允许空测试库恢复，**不支持正式云端恢复**。校验和用于检测意外更改，不能替代可信签名或安全加密。
+- `src/core/business.js`：业务重试使用标准化对象键顺序比对，避免备份恢复后命令属性顺序变化导致误判为不同操作；供应商预付款如已被月度抵扣，不允许先取消导致负数余额。
+- `src/integrations/calendar-sync.js`：Google 创建返回 409 时，必须以事件 private metadata 确认 `tsukinowaScheduleId`，不得仅凭确定性 eventId 认领；已登记売上日程的外部日期冲突输出 `reviews`，内部记录保持不变。独立内部日程不依赖 Google。
+- `firestore.rules`：未持 `linchenSandbox:true` 隔离测试声明的普通/admin 客户端**默认禁止直接写入**，包括金额/帳票/操作/audit；仅通过 Emulator 测试。不能将沙盒令牌发放给生产账号。正式线上必须采用可信服务端校验和受控发布，不能简单把沙盒声明开启。
+- `src/services/command-service.js`：旧数据总条数超过 `maximumRecords`（默认 2000）时立即阻止本次账务命令，不支持不完整写入；正式大数据量操作还需可信服务端分页及事务优化。
+- `tests/legacy-pdf-real.cjs` / `tests/business-pdf-integration.cjs`：补齐字体、图片解码、绘制帧稳定等待；旧新像素失配时对同一旧版/同一新版重复渲染并记录差异，**首次失配绝不自动转 PASS**。原始 HTML/JS 17 个文件依旧使用固定 SHA，不改原版模板。
+- 资料库查询未发现符合旧 Firebase 15 集合完整导出格式的正式数据，**真实历史金额逐行对照仍未验收**。
+
+### 最近实际运行
+
+| 类别 | CI | 结果 |
+| --- | --- | --- |
+| 核心业务 | https://github.com/sayonaraumi-tech/linchen/actions/runs/43418232499 | **150/150 通过** |
+| Firestore 隔离规则及服务端模拟事务 | https://github.com/sayonaraumi-tech/linchen/actions/runs/43417675764 | **已通过** |
+| 原版 PDF 及业务 PDF 完整对照 | https://github.com/sayonaraumi-tech/linchen/actions/runs/43417976780 | **14 个 PDF 原版对照 + 10 个业务快照对照通过** |
+| PDF 非确定性反例 | https://github.com/sayonaraumi-tech/linchen/actions/runs/43417922057 | **仍发生过 1/14 的偶发 pixel mismatch**（本次位置在桌面 estimate，不再是固定某个 17 行ケース） |
+
+### 仍需阻断 Stage 6 UI 的事项
+
+1. 历史真实原始 Firestore 15 集合无损导出及逐字段、金额和引用关系验证（现无完整资料）。
+2. 信赖的生产服务端账务命令校验、受控权限、安全恢复及大数据量分页验证（客户端写入现在锁定）。
+3. Google Calendar 真实 OAuth、专用测试 Calendar 双向写入与异常恢复（当前仅模拟 API 适配器测试）。
+4. PDF 随机失配根因定位与跨多次 CI 复现、稳定通过；未改变用户 PDF 模板。
+
+**结论：Stage 5 仍未全部通过；不得开发 Stage 6 UI，更不能切换或覆盖正式系统。**
