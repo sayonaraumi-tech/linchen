@@ -319,7 +319,7 @@ function operate(s,cmd){
   if(c.transactionType==='monthlyInvoice'&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw Error('請求対象月が不正です');
   const id=c.transactionType==='monthlyInvoice'?'monthly_'+supplier.id+'_'+month:c.transactionId||idFor(s,'supplierTx');
   const prev=row(s,'supplierTransactions',id);
-  if(prev){if(prev.amount!==amount||prev.date!==day||prev.type!==c.transactionType)throw Error('既存の仕入先取引と一致しません（訂正が必要）');a={transaction:prev,balance:supplierBalance(s,supplier.id),reused:true};break;}
+  if(prev){if(!active(prev))throw Error('取消済仕入先取引は再利用できません');if(prev.amount!==amount||prev.date!==day||prev.type!==c.transactionType)throw Error('既存の仕入先取引と一致しません（訂正が必要）');a={transaction:prev,balance:supplierBalance(s,supplier.id),reused:true};break;}
   const transaction=write(s,'supplierTransactions',{id,supplierId:supplier.id,date:day,type:c.transactionType,amount,invoiceMonth:c.transactionType==='monthlyInvoice'?month:'',paymentMethod:c.transactionType==='monthlyInvoice'?'未払':text(c.paymentMethod,'支払方法'),bankTxnId:'',description:String(c.description||''),status:'active'});
   if(transaction.type==='monthlyInvoice'){
     const eid='expense_'+id;
@@ -328,6 +328,24 @@ function operate(s,cmd){
     write(s,'cashLedger',{id:'cash_'+id,type:'expense',date:day,amount,sourceType:'supplierTransactions',sourceId:id,deletedAt:null});
   }
   a={transaction,balance:supplierBalance(s,supplier.id),reused:false};break;}
+ case 'voidSupplierTransaction':{
+  const tx=requireRow(s,'supplierTransactions',c.transactionId);
+  const reason=text(c.reason,'仕入先取引取消理由');
+  if(tx.bankTxnId)throw Error('仕入先の銀行照合を先に解除してください');
+  if(tx.type==='monthlyInvoice'){
+   const expense=row(s,'expenses','expense_'+tx.id);
+   if(!expense||!active(expense)||expense.supplierTransactionId!==tx.id||expense.bankTxnId)
+    throw Error('関連材料費が不一致または銀行照合済みのため取消できません');
+   expense.status='void';expense.voidReason=reason;
+  }else if(tx.paymentMethod==='現金'){
+   const ledger=row(s,'cashLedger','cash_'+tx.id);
+   if(!ledger||ledger.sourceId!==tx.id||ledger.type!=='expense')throw Error('関連現金記録の状態を確認してください');
+   ledger.deletedAt='void';
+  }
+  tx.status='void';tx.voidReason=reason;
+  a={transaction:tx,balance:supplierBalance(s,tx.supplierId)};
+  break;
+ }
  case 'saveExpense':{
   const amount=yen(c.amount);if(!amount)throw Error('支出金額は正数です');
   const id=c.id||idFor(s,'exp'),old=row(s,'expenses',id);
@@ -359,6 +377,16 @@ function operate(s,cmd){
   const b=requireRow(s,'bankTransactions',c.bankTxnId),tx=requireRow(s,'supplierTransactions',c.transactionId);
   if(b.direction!=='outgoing'||b.status!=='unmatched'||tx.paymentMethod==='現金'||tx.type==='monthlyInvoice'||tx.bankTxnId||b.amount!==tx.amount)throw Error('仕入先送金の照合条件が一致しません');
   b.status='matched';b.matchType='supplier';b.matchId=tx.id;tx.bankTxnId=b.id;a={bank:b,transaction:tx};break;}
+ case 'reviewBankIncome':{
+  if(c.reviewed!==true)throw Error('銀行雑収入の分類は明示確認が必要です');
+  const bank=requireRow(s,'bankTransactions',c.bankTxnId);
+  if(bank.direction!=='income'||bank.status!=='unmatched')throw Error('未照合の銀行入金明細を選択してください');
+  const category=c.interest===true?'受取利息':'雑収入';
+  const reason=text(c.reason,'銀行入金分類理由');
+  bank.status='matched';bank.matchType='bankIncome';bank.matchId=bank.id;
+  bank.category=category;bank.taxTreatment='要確認';bank.reviewNote=reason;
+  a={bank,category};break;
+ }
  case 'bankExclude':{
   const bank=requireRow(s,'bankTransactions',c.bankTxnId);
   const reason=text(c.reason,'銀行除外理由');
@@ -374,6 +402,7 @@ function operate(s,cmd){
   if(b.matchType==='payment'){const p=requireRow(s,'payments',b.matchId);p.bankTxnId='';p.confirmation=BANK_PENDING;}
   if(b.matchType==='expense'){const e=requireRow(s,'expenses',b.matchId);e.bankTxnId='';}
   if(b.matchType==='supplier'){const tx=requireRow(s,'supplierTransactions',b.matchId);tx.bankTxnId='';}
+  if(b.matchType==='bankIncome'){delete b.category;delete b.taxTreatment;delete b.reviewNote;}
   b.status='unmatched';b.matchType='';b.matchId='';a=b;break;}
  case 'cashAdjustment':{
   if(c.confirmed!==true)throw Error('現金残高調整の明示確認が必要です');
@@ -459,7 +488,8 @@ function perform(state,command){
 function getOverview(s){
  assertState(s);const sales=rows(s,'sales').filter(active),expenses=rows(s,'expenses').filter(active),payments=rows(s,'payments').filter(p=>active(p)&&[CASH,BANK_CONFIRMED].includes(p.confirmation));
  const cash=rows(s,'cashLedger').filter(active);
- return {sales:sum(sales),confirmedPayments:sum(payments),outstanding:sales.reduce((n,x)=>n+x.amount-totalPayments(s,x.id),0),expenses:sum(expenses),cashIn:sum(cash.filter(x=>x.type==='income')),cashOut:sum(cash.filter(x=>x.type==='expense')),salesCount:sales.length,expenseCount:expenses.length};
+ const otherIncome=sum(rows(s,'bankTransactions').filter(b=>active(b)&&b.status==='matched'&&b.matchType==='bankIncome'&&['受取利息','雑収入'].includes(b.category)));
+ return {otherIncome,sales:sum(sales),confirmedPayments:sum(payments),outstanding:sales.reduce((n,x)=>n+x.amount-totalPayments(s,x.id),0),expenses:sum(expenses),cashIn:sum(cash.filter(x=>x.type==='income')),cashOut:sum(cash.filter(x=>x.type==='expense')),salesCount:sales.length,expenseCount:expenses.length};
 }
 function list(s,collection){assertState(s);if(!COLLECTIONS.includes(collection))throw Error('Unsupported collection');return clone(rows(s,collection));}
 return {COLLECTIONS,TYPES,emptyState,perform,list,getOverview,balance,supplierBalance,suggestExpenseCategory};
