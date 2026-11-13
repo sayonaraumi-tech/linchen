@@ -103,3 +103,32 @@ test('two concurrent administrators cannot silently overwrite shared business ID
  assert.equal(saved.length,2);
  assert.notEqual(saved[0].id,saved[1].id);
 });
+
+test('advanced estimate acceptance and supplier monthly deduction commit as atomic Firestore business transactions',async()=>{
+ const {createCommandService}=require('../src/services/command-service');
+ const {repo}=context('admin','admin');
+ const service=createCommandService({repository:repo,maximumChanges:6});
+ const estimate={operationId:'fs-est-base',type:'issueDocument',docType:'estimate',sourceKey:'fs-est-base',amount:11000,
+  snapshot:{customerName:'合成顧客',invoiceDate:'2026-11-13',items:[{content:'クロス張替',qty:1,price:10000}]}};
+ await service.execute(estimate);
+ const estimateId=(await repo.list('documents')).find(x=>x.payload.sourceKey==='fs-est-base').id;
+ const accepted=await service.execute({operationId:'fs-est-accept',type:'acceptEstimate',estimateId,workDate:'2026-11-19'});
+ assert.equal(accepted.reused,false);assert.equal(accepted.changes,4);
+ const schedules=(await repo.list('schedule')).filter(x=>x.payload.estimateId===estimateId);
+ assert.equal(schedules.length,1);assert.equal((await repo.list('sales')).filter(x=>x.payload.scheduleId===schedules[0].id).length,0);
+ await service.execute({operationId:'fs-supplier-new',type:'saveSupplier',name:'合成仕入先',openingBalance:100000});
+ const supplier=(await repo.list('suppliers')).find(x=>x.payload.name==='合成仕入先');
+ const saved=await service.execute({operationId:'fs-supplier-month',type:'settleSupplierInvoice',supplierId:supplier.id,
+  invoiceMonth:'2026-11',invoiceNo:'FS-SUPPLIER-001',date:'2026-11-30',amount:80000,deductionAmount:60000,
+  description:'材料仕入',reviewed:true});
+ assert.equal(saved.reused,false);assert.equal(saved.changes,3);
+ const t=(await repo.list('supplierTransactions')).filter(x=>x.payload.invoiceNo==='FS-SUPPLIER-001');
+ const exp=(await repo.list('expenses')).filter(x=>x.payload.supplierTransactionId===t[0].id);
+ assert.equal(t.length,1);assert.equal(t[0].payload.deductionAmount,60000);assert.equal(exp.length,1);
+ assert.equal(exp[0].payload.amount,80000);
+ const replay=await service.execute({operationId:'fs-supplier-month',type:'settleSupplierInvoice',supplierId:supplier.id,
+  invoiceMonth:'2026-11',invoiceNo:'FS-SUPPLIER-001',date:'2026-11-30',amount:80000,deductionAmount:60000,
+  description:'材料仕入',reviewed:true});
+ assert.equal(replay.reused,true);
+ assert.equal((await repo.list('expenses')).filter(x=>x.payload.supplierTransactionId===t[0].id).length,1);
+});
