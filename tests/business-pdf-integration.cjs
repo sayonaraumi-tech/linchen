@@ -87,6 +87,11 @@ async function pdf(browser,url,kind,caseSpec,width,document,state){
  },{doc:document});
  if(caseSpec.docType!=='receipt')assert.equal(values.actualRows,caseSpec.rows);
  if(caseSpec.docType==='onoda')assert.equal(values.pageMode,caseSpec.rows<=16?'single':'multi');
+ await p.evaluate(async()=>{
+  await document.fonts.ready;
+  await Promise.all([...document.images].map(async img=>{try{if(img.decode)await img.decode();}catch{}}));
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ });
  const downloadPromise=p.waitForEvent('download',{timeout:20000});
  await p.evaluate(()=>doPrint());
  const download=await downloadPromise;
