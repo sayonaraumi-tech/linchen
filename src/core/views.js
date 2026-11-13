@@ -42,8 +42,11 @@ function dashboard(s,p={}){
  const sales=salesRegister(s,p),expenses=expensesRegister(s,p);
  const confirmed=paymentsRegister(s,p).filter(x=>['bank-confirmed','cash-received'].includes(x.confirmation));
  const cash=cashRegister(s,p);
+ const otherIncome=B.list(s,'bankTransactions').filter(active)
+  .filter(x=>x.status==='matched'&&x.matchType==='bankIncome'&&['受取利息','雑収入'].includes(x.category)&&included(x.date,window))
+  .reduce((n,x)=>n+amount(x),0);
  return {
-  period:window,sales:sales.reduce((v,x)=>v+x.sales,0),
+  period:window,otherIncome,sales:sales.reduce((v,x)=>v+x.sales,0),
   receipts:confirmed.reduce((v,x)=>v+x.amount,0),
   expenses:expenses.reduce((v,x)=>v+x.amount,0),
   outstanding:sales.reduce((v,x)=>v+x.outstanding,0),
