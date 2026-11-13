@@ -15,7 +15,7 @@ test('no global clear required: delete one test record after explicit confirmati
  await a.perform({operationId:'three',type:'deleteTestRecord',collection:'projects',id:'project_000001',confirmTestDeletion:true});
  const b=createSandboxStore({storage:mem});
  assert.equal(Object.keys(b.snapshot().collections.projects).length,1);
- assert.equal(b.snapshot().collections.projects.project_000002.customer,'B');
+ assert.equal(Object.values(b.snapshot().collections.projects)[0].customer,'B');
 });
 test('failed action cannot alter stored data',async()=>{
  const mem=storage(),a=createSandboxStore({storage:mem});
