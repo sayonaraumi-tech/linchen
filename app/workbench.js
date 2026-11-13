@@ -34,7 +34,7 @@ function schedule(){
  const edit=list('schedule').find(x=>x.id===editing.schedule&&x.status==='active');
  const inputs=field('date','施工日','date',edit?.date||today())+field('title','予定名','text',edit?.title||'')+field('customer','取引先','text',edit?.customer||'',false)+field('description','内容','text',edit?.description||'',false);
  const cells=monthView.cells.map(c=>'<div class="day'+(c.inMonth?'':' outside')+'" data-date="'+esc(c.date)+'"><b>'+esc(c.day)+'</b>'+c.events.map(e=>'<div class="event">'+esc(e.title)+'<small> '+esc(e.status)+'</small></div>').join('')+'</div>').join('');
- const rows=list('schedule').filter(x=>x.status==='active').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+' '+button('schedule-edit',e.id,'編集')+' '+(!e.registeredSaleId?button('schedule-void',e.id,'取消'):'')+'</td></tr>');
+ const rows=list('schedule').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.status!=='active'?button('schedule-restore',e.id,'復元'):(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+' '+button('schedule-edit',e.id,'編集')+' '+(!e.registeredSaleId?button('schedule-void',e.id,'取消'):''))+'</td></tr>');
  return page('日程','内部日程が主データです。Google Calendar は不要で、無接続でも追加・表示できます。',
  '<label>対象月<input type="month" id="calendar-month" value="'+esc(month)+'"></label><div class="day-grid">'+cells+'</div>'+
  form('schedule',inputs,edit?'日程の変更を保存':'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID','操作'],rows));
@@ -80,7 +80,7 @@ function expenses(){
  field('category','勘定科目','text',edit?.category||'材料費')+field('amount','金額','number',edit?.amount||1000)+
  select('paymentMethod','支払方法',[['現金','現金'],['銀行振込','銀行振込'],['法人信用カード','法人信用カード']]);
  const expenses=list('expenses');
- const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(e.status)+'</td><td>'+button('expense-edit',e.id,'編集')+' '+button('expense-void',e.id,'取消')+' '+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
+ const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(e.status)+'</td><td>'+(e.status==='active'?button('expense-edit',e.id,'編集')+' '+button('expense-void',e.id,'取消'):button('expense-restore',e.id,'復元'))+' '+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
  const cash=list('cashLedger').filter(e=>!e.deletedAt);
  return page('支出・現金','現金支出は一件の現金台帳に鏡映。重複計上しません。',
  form('expense',input,edit?'支出を変更':'支出登録')+grid(['日付','支払先','科目','金額','方法','状態','操作'],rows)+
@@ -102,7 +102,7 @@ function settings(){
  const customers=list('customers');
  return page('設定','独立テストデータのみ。旧システムの設定値は取得・上書きしません。',
  form('setting',input,'設定を保存')+form('customer',customer,edit?'取引先を変更':'取引先を追加')+
- grid(['名前','住所','ID','操作'],customers.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.address)+'</td><td>'+esc(x.id)+'</td><td>'+button('customer-edit',x.id,'編集')+' '+button('customer-delete',x.id,'テスト削除')+'</td></tr>'))+
+ grid(['名前','住所','ID','操作'],customers.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.address)+'</td><td>'+esc(x.id)+'</td><td>'+(x.status==='active'?button('customer-edit',x.id,'編集')+' '+button('customer-void',x.id,'取消'):button('customer-restore',x.id,'復元'))+' '+button('customer-delete',x.id,'テスト削除')+'</td></tr>'))+
  '<button type="button" data-action="backup">テストデータのバックアップを保存</button>');
 }
 const views={home,schedule,documents,history,sales,expenses,bank,settings};
@@ -163,10 +163,10 @@ async function clickAction(btn){
   if(!list(collection).some(x=>x.id===id&&x.status==='active'))throw Error('有効な編集対象がありません');
   editing[key]=id;render(current);notice('編集対象を選択しました');return;
  }
- if(['schedule-void','expense-void'].includes(action)){
+ if(['schedule-void','expense-void','customer-void'].includes(action)){
   const reason=prompt('取消理由を入力してください');
   if(!reason)return;
-  await store.perform({type:'voidRecord',collection:action==='schedule-void'?'schedule':'expenses',id,reason,operationId:operationId()});
+  await store.perform({type:'voidRecord',collection:action==='schedule-void'?'schedule':action==='customer-void'?'customers':'expenses',id,reason,operationId:operationId()});
   notice('対象を取消しました。履歴は保持します');render(current);return;
  }
  if(action==='document-pdf'){
@@ -188,6 +188,12 @@ async function clickAction(btn){
   setTimeout(()=>URL.revokeObjectURL(url),0);
   if(JSON.stringify(snapshot())!==before)throw Error('PDF再ダウンロード中の会計データ変更');
   notice('原版PDFをダウンロードしました（データ変更なし）');return;
+ }
+ if(['schedule-restore','expense-restore','customer-restore'].includes(action)){
+  const collection={schedule:'schedule',expense:'expenses',customer:'customers'}[action.split('-')[0]];
+  if(!confirm('取消記録を復元しますか？ 原本と取消履歴は保持します。'))return;
+  await store.perform({type:'restoreRecord',collection,id,confirmRestore:true,operationId:operationId()});
+  notice('取消済みの記録を復元しました');render(current);return;
  }
  if(action==='document-detail'){
   const d=list('documents').find(x=>x.id===id);
