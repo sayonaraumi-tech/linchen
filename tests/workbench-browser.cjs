@@ -129,3 +129,66 @@ test('bank matching is explicit and never creates a duplicate sale',async()=>{
   assert.equal(Object.keys(data.collections.cashLedger).length,0);
  }finally{await app.close();}
 });
+
+test('every one of eight navigation buttons opens the expected functional workspace',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  for(const name of ['HOME','日程','帳票','帳票履歴','売上・入金','支出・現金','銀行照合','設定']){
+   await app.page.getByRole('button',{name,exact:true}).click();
+   assert.equal(await app.page.locator('#page h2').innerText(),name);
+   assert.equal(await app.page.getByRole('button',{name,exact:true}).getAttribute('aria-current'),'page');
+  }
+ }finally{await app.close();}
+});
+test('rapid duplicate receipt form submits commit exactly one receipt/sale/payment/cash row',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'帳票',exact:true}).click();
+  await app.page.locator('[name=docType]').selectOption('receipt');
+  await app.page.locator('[name=customerName]').fill('連打確認顧客');
+  await app.page.locator('[name=amount]').fill('15000');
+  await app.page.locator('form[data-action=document]').evaluate(form=>{
+   form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+   form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  });
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('保存しました'));
+  const data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  for(const collection of ['documents','sales','payments','cashLedger'])assert.equal(Object.keys(data.collections[collection]).length,1,collection);
+ }finally{await app.close();}
+});
+test('estimated document does not create sales and existing invoice remains unchanged after history navigation',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'帳票',exact:true}).click();
+  await app.page.locator('[name=docType]').selectOption('estimate');
+  await app.page.locator('[name=customerName]').fill('見積テスト顧客');
+  await app.page.locator('[name=amount]').fill('10000');
+  await app.page.getByRole('button',{name:'帳票を正式保存'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('保存しました'));
+  await app.page.getByRole('button',{name:'帳票履歴'}).click();
+  assert.match(await app.page.locator('#page').innerText(),/見積テスト顧客/);
+  const data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.documents).length,1);
+  assert.equal(Object.keys(data.collections.sales).length,0);
+ }finally{await app.close();}
+});
+test('missing bank match candidate does not manufacture payment or expense',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'銀行照合'}).click();
+  await app.page.locator('[name=externalId]').fill('bank-no-target');
+  await app.page.locator('[name=description]').fill('候補未登録');
+  await app.page.locator('[name=amount]').fill('13000');
+  await app.page.getByRole('button',{name:'銀行明細のテスト登録'}).click();
+  await app.page.getByRole('button',{name:'候補を確認'}).click();
+  assert.match(await app.page.locator('#status').innerText(),/同額の未照合対象がありません/);
+  const data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.payments).length,0);
+  assert.equal(Object.keys(data.collections.expenses).length,0);
+  assert.equal(Object.keys(data.collections.bankTransactions).length,1);
+ }finally{await app.close();}
+});
