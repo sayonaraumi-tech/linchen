@@ -110,7 +110,7 @@ function operate(s,cmd){
  case 'saveSchedule':{
   const id=c.id||idFor(s,'event'),old=row(s,'schedule',id);
   if(old?.registeredSaleId&&c.projectId&&c.projectId!==old.projectId)throw Error('売上登録済みの工事は案件変更できません');
-  a=write(s,'schedule',{...old,id,date:date(c.date,'施工日'),title:text(c.title,'予定名'),customer:String(c.customer||''),description:String(c.description||''),projectId:String(c.projectId||old?.projectId||''),googleEventId:String(c.googleEventId||old?.googleEventId||''),registeredSaleId:old?.registeredSaleId||'',status:'active'});break;}
+  a=write(s,'schedule',{...old,id,date:date(c.date,'施工日'),title:text(c.title,'予定名'),customer:c.customer===undefined?old?.customer||'':String(c.customer),description:c.description===undefined?old?.description||'':String(c.description),projectId:String(c.projectId||old?.projectId||''),calendarId:String(c.calendarId||old?.calendarId||''),googleEventId:String(c.googleEventId||old?.googleEventId||''),googleUpdatedAt:c.googleUpdatedAt||old?.googleUpdatedAt||'',googleStatus:c.googleStatus||old?.googleStatus||'confirmed',start:c.start||old?.start||'',end:c.end||old?.end||'',location:c.location===undefined?old?.location||'':String(c.location),registeredSaleId:old?.registeredSaleId||'',status:'active'});break;}
  case 'registerScheduleSale':{
   const ev=requireRow(s,'schedule',c.scheduleId);
   if(ev.registeredSaleId){a=requireRow(s,'sales',ev.registeredSaleId);break;}
