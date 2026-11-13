@@ -12,6 +12,7 @@ const Numbering=typeof module==='object'&&module.exports?require('./document-num
 const COLLECTIONS=Object.freeze(['settings','customers','projects','schedule','documents','sales','payments','expenses','cashLedger','bankTransactions','suppliers','supplierTransactions','auditLogs']);
 const TYPES=Object.freeze(['estimate','invoice','receipt','onoda']);
 const clone=x=>JSON.parse(JSON.stringify(x));
+const canonical=x=>JSON.stringify((function stable(v){return Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;})(x));
 const yen=x=>{if(typeof x==='string'&&!/^\d+$/.test(x.trim()))throw Error('金額は円単位の整数で入力してください');const n=Number(x);if(!Number.isSafeInteger(n)||n<0)throw Error('金額は0以上の安全な整数を指定してください');return n;};
 const signedYen=x=>{if(typeof x==='string'&&!/^-?\d+$/.test(x.trim()))throw Error('残高は円単位の整数で入力してください');const n=Number(x);if(!Number.isSafeInteger(n))throw Error('残高は安全な整数で入力してください');return n;};
 const text=(v,k)=>{let s=String(v??'').trim();if(!s)throw Error(k+'は必須です');return s;};
@@ -477,7 +478,7 @@ function perform(state,command){
  assertState(state);const c=clone(command||{});const operationId=text(c.operationId,'操作ID');
  if(state.operationIds[operationId]){
   const previous=state.operationIds[operationId];
-  if(previous.type!==c.type||previous.command&&JSON.stringify(previous.command)!==JSON.stringify(c))throw Error('同じ操作IDで異なる内容を保存できません');
+  if(previous.type!==c.type||previous.command&&canonical(previous.command)!==canonical(c))throw Error('同じ操作IDで異なる内容を保存できません');
   return {state:clone(state),result:clone(previous.result),reused:true};
  }
  const candidate=clone(state);const result=operate(candidate,c);
