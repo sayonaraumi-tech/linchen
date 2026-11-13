@@ -116,3 +116,4 @@ service cloud.firestore {
    allow delete: if false;
   }
  }
+}
