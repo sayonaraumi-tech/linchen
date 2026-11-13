@@ -83,3 +83,47 @@ test('test server blocks firebase config and non-app/source files',async()=>{
   assert.equal(b.status(),200);
  }finally{await app.close();}
 });
+
+test('calendar business sale can be registered once without any Google event',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'日程',exact:true}).click();
+  await app.page.locator('input[name=date]').fill('2026-11-16');
+  await app.page.locator('input[name=title]').fill('内部売上確認');
+  await app.page.getByRole('button',{name:'日程を保存'}).click();
+  app.page.once('dialog',d=>d.accept('11000'));
+  await app.page.getByRole('button',{name:'売上登録',exact:true}).click();
+  let data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.sales).length,1);
+  assert.equal(Object.keys(data.collections.schedule).length,1);
+  assert.equal(Object.values(data.collections.schedule)[0].registeredSaleId,Object.values(data.collections.sales)[0].id);
+ }finally{await app.close();}
+});
+test('bank matching is explicit and never creates a duplicate sale',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'帳票',exact:true}).click();
+  await app.page.locator('[name=docType]').selectOption('invoice');
+  await app.page.locator('[name=customerName]').fill('銀行試験先');
+  await app.page.locator('[name=amount]').fill('11000');
+  await app.page.getByRole('button',{name:'帳票を正式保存'}).click();
+  await app.page.getByRole('button',{name:'売上・入金',exact:true}).click();
+  await app.page.locator('[name=amount]').fill('11000');
+  await app.page.locator('[name=method]').selectOption('銀行振込');
+  await app.page.getByRole('button',{name:'入金登録'}).click();
+  await app.page.getByRole('button',{name:'銀行照合'}).click();
+  await app.page.locator('[name=externalId]').fill('bank-synthetic-1');
+  await app.page.locator('[name=description]').fill('テスト入金');
+  await app.page.locator('[name=amount]').fill('11000');
+  await app.page.getByRole('button',{name:'銀行明細のテスト登録'}).click();
+  app.page.on('dialog',d=>d.accept());
+  await app.page.getByRole('button',{name:'候補を確認'}).click();
+  const data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.sales).length,1);
+  assert.equal(Object.values(data.collections.payments)[0].confirmation,'bank-confirmed');
+  assert.equal(Object.values(data.collections.bankTransactions)[0].status,'matched');
+  assert.equal(Object.keys(data.collections.cashLedger).length,0);
+ }finally{await app.close();}
+});
