@@ -192,3 +192,98 @@ test('missing bank match candidate does not manufacture payment or expense',asyn
   assert.equal(Object.keys(data.collections.bankTransactions).length,1);
  }finally{await app.close();}
 });
+
+test('estimate -> invoice -> bank payment -> receipt -> HOME remains one sale and one payment',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'帳票',exact:true}).click();
+  await app.page.locator('[name=docType]').selectOption('estimate');
+  await app.page.locator('[name=customerName]').fill('同一業務テスト');
+  await app.page.locator('[name=description]').fill('原本クロス工事');
+  await app.page.locator('[name=amount]').fill('10000');
+  await app.page.getByRole('button',{name:'帳票を正式保存'}).click();
+  await app.page.getByRole('button',{name:'帳票履歴',exact:true}).click();
+  app.page.on('dialog',d=>d.accept());
+  await app.page.getByRole('button',{name:'請求書に変換'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('請求書を発行'));
+  let data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.sales).length,1);
+  assert.equal(Object.keys(data.collections.documents).length,2);
+  await app.page.getByRole('button',{name:'売上・入金',exact:true}).click();
+  await app.page.locator('[name=method]').selectOption('銀行振込');
+  await app.page.locator('[name=amount]').fill('11000');
+  await app.page.getByRole('button',{name:'入金登録'}).click();
+  await app.page.getByRole('button',{name:'銀行照合',exact:true}).click();
+  await app.page.locator('[name=externalId]').fill('full-chain-bank');
+  await app.page.locator('[name=description]').fill('請求入金');
+  await app.page.locator('[name=amount]').fill('11000');
+  await app.page.getByRole('button',{name:'銀行明細のテスト登録'}).click();
+  await app.page.getByRole('button',{name:'候補を確認'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('銀行照合を確定'));
+  await app.page.getByRole('button',{name:'売上・入金',exact:true}).click();
+  await app.page.getByRole('button',{name:'領収書発行'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('領収書を発行'));
+  data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.sales).length,1);
+  assert.equal(Object.keys(data.collections.documents).length,3);
+  assert.equal(Object.keys(data.collections.payments).length,1);
+  assert.equal(Object.keys(data.collections.bankTransactions).length,1);
+  assert.equal(Object.keys(data.collections.cashLedger).length,0);
+  await app.page.getByRole('button',{name:'HOME',exact:true}).click();
+  assert.match(await app.page.locator('#page').innerText(),/未入金[\s\S]*0 円/);
+ }finally{await app.close();}
+});
+test('edit cancel and restore expense uses a single cash entry and updates HOME',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'支出・現金',exact:true}).click();
+  await app.page.locator('[name=vendor]').fill('テスト材料屋');
+  await app.page.locator('[name=amount]').fill('5000');
+  await app.page.locator('[name=paymentMethod]').selectOption('現金');
+  await app.page.getByRole('button',{name:'支出登録'}).click();
+  await app.page.getByRole('button',{name:'編集'}).click();
+  await app.page.locator('[name=amount]').fill('3000');
+  await app.page.getByRole('button',{name:'支出を変更'}).click();
+  let data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.cashLedger).length,1);
+  assert.equal(Object.values(data.collections.cashLedger)[0].amount,3000);
+  app.page.on('dialog',d=>d.accept('二重登録'));
+  await app.page.getByRole('button',{name:'取消'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('取消しました'));
+  await app.page.getByRole('button',{name:'HOME',exact:true}).click();
+  assert.match(await app.page.locator('#page').innerText(),/現金出[\s\S]*0 円/);
+  await app.page.getByRole('button',{name:'支出・現金',exact:true}).click();
+  await app.page.getByRole('button',{name:'復元'}).click();
+  await app.page.waitForFunction(()=>document.querySelector('#status')?.textContent.includes('復元しました'));
+  data=await app.page.evaluate(()=>JSON.parse(localStorage.getItem('linchen_independent_test_v1')));
+  assert.equal(Object.keys(data.collections.cashLedger).length,1);
+  assert.equal(Object.values(data.collections.cashLedger)[0].amount,3000);
+  await app.page.getByRole('button',{name:'HOME',exact:true}).click();
+  assert.match(await app.page.locator('#page').innerText(),/現金出[\s\S]*3,000 円/);
+ }finally{await app.close();}
+});
+test('saved historical document re-downloads real frozen PDF without changing accounting snapshot',async()=>{
+ const app=await create();
+ try{
+  await app.page.goto(app.site.url);
+  await app.page.getByRole('button',{name:'帳票',exact:true}).click();
+  await app.page.locator('[name=docType]').selectOption('invoice');
+  await app.page.locator('[name=customerName]').fill('PDF検証顧客');
+  await app.page.locator('[name=amount]').fill('10000');
+  await app.page.getByRole('button',{name:'帳票を正式保存'}).click();
+  await app.page.reload();
+  await app.page.getByRole('button',{name:'帳票履歴',exact:true}).click();
+  const before=await app.page.evaluate(()=>localStorage.getItem('linchen_independent_test_v1'));
+  const pending=app.page.waitForEvent('download',{timeout:45000});
+  await app.page.getByRole('button',{name:'原版PDF'}).click();
+  const downloaded=await pending;
+  assert(downloaded.suggestedFilename().endsWith('.pdf'));
+  const buffer=require('node:fs').readFileSync(await downloaded.path());
+  assert.equal(buffer.subarray(0,4).toString('ascii'),'%PDF');
+  assert(buffer.length>1000);
+  const after=await app.page.evaluate(()=>localStorage.getItem('linchen_independent_test_v1'));
+  assert.equal(after,before,'PDF download must be read only');
+ }finally{await app.close();}
+});
