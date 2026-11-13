@@ -107,7 +107,7 @@ test('bank matching is explicit and never creates a duplicate sale',async()=>{
   await app.page.getByRole('button',{name:'帳票',exact:true}).click();
   await app.page.locator('[name=docType]').selectOption('invoice');
   await app.page.locator('[name=customerName]').fill('銀行試験先');
-  await app.page.locator('[name=amount]').fill('11000');
+  await app.page.locator('[name=amount]').fill('10000');
   await app.page.getByRole('button',{name:'帳票を正式保存'}).click();
   await app.page.getByRole('button',{name:'売上・入金',exact:true}).click();
   await app.page.locator('[name=amount]').fill('11000');
