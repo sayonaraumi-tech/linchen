@@ -58,3 +58,16 @@ test('supplier transfer matches bank outgoing with no duplicate expense',()=>{
  s=act(s,'unmatch',{type:'unmatchBank',bankTxnId:b.id});
  assert.equal(B.list(s,'supplierTransactions')[0].bankTxnId,'');
 });
+
+test('supplier negative opening balance represents outstanding payable rather than being discarded',()=>{
+ let s=B.emptyState();
+ s=act(s,'supplier-liability',{type:'saveSupplier',name:'材料商',openingBalance:-50000});
+ const supplier=B.list(s,'suppliers')[0];
+ assert.equal(B.supplierBalance(s,supplier.id),-50000);
+});
+test('unlinked bank receipt must not manufacture independent sales',()=>{
+ let s=B.emptyState(),before=JSON.stringify(s);
+ assert.throws(()=>B.perform(s,{operationId:'bank-receipt',type:'issueDocument',docType:'receipt',sourceKey:'r-bank',
+  snapshot:{customerName:'A',invoiceDate:'2026-11-13',receiptTotal:11000,paymentMethod:'銀行振込'}}),/明示的な紐付け/);
+ assert.equal(JSON.stringify(s),before);
+});
