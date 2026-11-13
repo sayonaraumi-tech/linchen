@@ -6,7 +6,7 @@ const projectId='demo-tsukinowa-construction';
 before(async()=>{env=await initializeTestEnvironment({projectId,firestore:{host:'127.0.0.1',port:8086,rules:fs.readFileSync(path.join(__dirname,'../firestore.rules'),'utf8')}});});
 after(async()=>{if(env)await env.cleanup();});
 function context(uid,role,companyId='tsukinowa'){
- const ctx=env.authenticatedContext(uid,{role,companyId});
+ const ctx=env.authenticatedContext(uid,{role,companyId,linchenSandbox:true});
  const repo=createRepository({sdk,db:ctx.firestore(),getIdentity:async()=>({uid,role,companyId}),companyId:'tsukinowa',writeEnabled:true});
  return {ctx,repo};
 }
@@ -131,4 +131,12 @@ test('advanced estimate acceptance and supplier monthly deduction commit as atom
   description:'材料仕入',reviewed:true});
  assert.equal(replay.reused,true);
  assert.equal((await repo.list('expenses')).filter(x=>x.payload.supplierTransactionId===t[0].id).length,1);
+});
+
+test('even a company admin cannot write without isolated sandbox claim',async()=>{
+ const ctx=env.authenticatedContext('prod-admin-no-test-claim',{role:'admin',companyId:'tsukinowa'});
+ const ref=sdk.doc(ctx.firestore(),'companies/tsukinowa/settings/no-test-change');
+ await assertFails(sdk.setDoc(ref,{companyId:'tsukinowa',value:'forbidden'}));
+ const other=env.authenticatedContext('prod-admin-false',{role:'admin',companyId:'tsukinowa',linchenSandbox:false});
+ await assertFails(sdk.setDoc(sdk.doc(other.firestore(),'companies/tsukinowa/settings/false-claim'),{test:true}));
 });
