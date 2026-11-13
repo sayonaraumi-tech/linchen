@@ -71,8 +71,9 @@ function issue(s,x){
  const amount=docType==='receipt'?yen(snapshot.receiptTotal):yen(x.amount);
  if(!amount)throw Error('帳票金額は正数です');
  const sourceKey=x.sourceKey?text(x.sourceKey,'帳票参照'):'';
- const existing=sourceKey?rows(s,'documents').find(d=>active(d)&&d.sourceKey===sourceKey&&d.docType===docType):null;
+ const existing=sourceKey?rows(s,'documents').find(d=>d.sourceKey===sourceKey&&d.docType===docType):null;
  if(existing){
+  if(existing.status!=='active')throw Error('訂正済・取消済帳票の元参照は再発行できません。訂正処理を使用してください');
   const originalSnapshot=clone(existing.snapshot),requested=clone(snapshot);
   delete originalSnapshot.invoiceNo;delete requested.invoiceNo;
   if(existing.amount!==amount||JSON.stringify(originalSnapshot)!==JSON.stringify(requested))throw Error('発行済帳票の修正は訂正版を作成してください');
@@ -115,7 +116,7 @@ function operate(s,cmd){
   a=write(s,'settings',{id:key,key,value:clone(c.value),status:'active'});break;}
  case 'saveCustomer':{
   const name=text(c.name,'顧客名'),id=c.id||idFor(s,'customer');
-  const old=row(s,'customers',id);a=write(s,'customers',{...old,id,name,address:String(c.address||''),status:'active'});break;}
+  const old=row(s,'customers',id);if(old&&!active(old))throw Error('無効な顧客を直接上書きできません');a=write(s,'customers',{...old,id,name,address:c.address===undefined?old?.address||'':String(c.address),status:'active'});break;}
  case 'saveProject':{
   const id=c.id||idFor(s,'project');
   a=write(s,'projects',{id,customer:text(c.customer,'顧客'),description:String(c.description||''),status:'active'});break;}
