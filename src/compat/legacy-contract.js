@@ -98,8 +98,10 @@ function validateLegacyDump(dump,{strictCollections=true,strictLinks=false}={}){
   for(const entry of records(dump[name])){
    if(!entry||typeof entry!=='object')continue;
    const {id,payload}=unwrap(entry,name);
-   for(const [field,target] of Object.entries(links)){
-    const value=payload[field];if(!value||!index[target])continue;
+   for(const [field,declaredTarget] of Object.entries(links)){
+    const value=payload[field];
+    const target=declaredTarget==='sales'&&String(value||'').startsWith('receivable_')?'receivables':declaredTarget;
+    if(!value||!index[target])continue;
     const targetCollectionIncluded=Object.prototype.hasOwnProperty.call(dump,target);
     if(!targetCollectionIncluded)continue; // report is partial; do not infer loss.
     if(!index[target].has(value)){
