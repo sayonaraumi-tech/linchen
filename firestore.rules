@@ -38,16 +38,28 @@ service cloud.firestore {
     && a.operationId==d.lastOperationId && a.timestamp==request.time
     && a.entityType==name && a.entityId==id && a.after==d.payload;
   }
+  function validDocumentNumber(company,name,id,d) {
+   return name!='documents' ||
+     (d.payload.invoiceNo is string
+      && d.payload.snapshot.invoiceNo==d.payload.invoiceNo
+      && getAfter(/databases/$(database)/documents/companies/$(company)/documentNumbers/$(d.payload.invoiceNo)).data.documentId==id);
+  }
+  function immutableDocumentFields(name,d,old){
+   return name!='documents' ||
+     (d.payload.invoiceNo==old.payload.invoiceNo
+      && d.payload.docType==old.payload.docType
+      && d.payload.snapshot==old.payload.snapshot);
+  }
   function validCreate(company,name,id) {
    let d=request.resource.data;
-   return validCommon(company,name,id) && d.revision==1
+   return validCommon(company,name,id) && validDocumentNumber(company,name,id,d) && d.revision==1
      && d.createdAt==request.time && d.createdBy==request.auth.uid
      && audit(company,d.lastAuditId).before==null;
   }
   function validUpdate(company,name,id) {
    let d=request.resource.data;
    let old=resource.data;
-   return validCommon(company,name,id)
+   return validCommon(company,name,id) && immutableDocumentFields(name,d,old)
      && d.revision==old.revision+1
      && d.createdAt==old.createdAt && d.createdBy==old.createdBy
      && d.companyId==old.companyId
@@ -66,6 +78,18 @@ service cloud.firestore {
      && request.resource.data.targets.size()>=1 && request.resource.data.targets.size()<=10
      && request.resource.data.signature is string
      && request.resource.data.action is string;
+   allow update,delete: if false;
+  }
+  match /companies/{company}/documentNumbers/{number} {
+   allow get,list: if admin(company);
+   allow create: if admin(company)
+     && request.resource.data.keys().hasOnly(['invoiceNo','operationId','actorId','companyId','documentId','createdAt'])
+     && request.resource.data.invoiceNo==number
+     && request.resource.data.companyId==company
+     && request.resource.data.actorId==request.auth.uid
+     && request.resource.data.createdAt==request.time
+     && operation(company,request.resource.data.operationId).targets.hasAny(['documents/'+request.resource.data.documentId])
+     && operation(company,request.resource.data.operationId).actorId==request.auth.uid;
    allow update,delete: if false;
   }
   match /companies/{company}/auditLogs/{auditId} {
