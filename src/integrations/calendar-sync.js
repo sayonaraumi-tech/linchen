@@ -62,5 +62,51 @@ async function patchLinkedEvent({provider,calendarId,eventId,etag,description,su
  try{return {status:'updated',event:await provider.patch({calendarId,eventId,etag,patch})};}
  catch(e){if(e.status===409||e.status===412)return {status:'conflict',requiresReview:true,error:String(e.message||e)};throw e;}
 }
-return {parseGoogleEvent,applyIncoming,collectPages,patchLinkedEvent,eventIdentity};
+
+/* Explicit outbound sync: internal calendar saves succeed without this function.
+ * Google writes return a link proposal, not an accounting mutation.
+ */
+async function pushInternalEvent({schedule,calendarId,provider,digest}){
+ if(!schedule?.id||!schedule.date||!schedule.title||!calendarId)throw Error('内部日程、日付、対象カレンダーが必要です');
+ if(!provider||typeof provider.insert!=='function'||typeof provider.patch!=='function'||typeof provider.get!=='function'||typeof digest!=='function')throw Error('Google API接続が必要です');
+ if(schedule.googleEventId&&schedule.calendarId&&schedule.calendarId!==calendarId)return {status:'requires-review',reason:'すでに別のカレンダーに紐付いています'};
+ const stable=await digest('tsukinowa|'+calendarId+'|'+schedule.id);
+ if(!/^[0-9a-f]{32,128}$/i.test(stable))throw Error('Invalid deterministic event digest');
+ const eventId=schedule.googleEventId||'tsuki'+stable.slice(0,40);
+ const body={
+  summary:schedule.title,
+  description:schedule.description||'',
+  location:schedule.location||'',
+  start:{date:schedule.date},
+  end:{date:new Date(Date.parse(schedule.date+'T00:00:00Z')+86400000).toISOString().slice(0,10)},
+ };
+ let result;
+ try{
+  if(schedule.googleEventId){
+   result=await provider.patch({calendarId,eventId,etag:schedule.googleEtag||'',patch:body});
+  }else{
+   result=await provider.insert({calendarId,id:eventId,body:{...body,id:eventId}});
+  }
+ }catch(e){
+  if(e.status===409&&!schedule.googleEventId){
+   try{result=await provider.get({calendarId,eventId});if(!result||result.id!==eventId)throw Error('Cannot verify existing Google event');}
+   catch{return {status:'requires-review',reason:'Google event identity collision',eventId};}
+  }else if(e.status===409||e.status===412){
+   return {status:'conflict',requiresReview:true,reason:'Google Calendarの同時変更を確認してください',eventId};
+  }else{
+   return {status:'pending',retryable:true,reason:String(e.message||e),eventId};
+  }
+ }
+ if(result?.id!==eventId)throw Error('Google response identity mismatch');
+ const command={
+  operationId:'calendar-link-'+stable.slice(0,24)+'-'+String(result.etag||result.updated||'confirmed').replace(/[^a-z0-9]/gi,'').slice(0,24),
+  type:'saveSchedule',id:schedule.id,date:schedule.date,title:schedule.title,
+  customer:schedule.customer||'',description:schedule.description||'',
+  projectId:schedule.projectId||'',start:schedule.start||'',end:schedule.end||'',
+  location:schedule.location||'',calendarId,googleEventId:eventId,
+  googleUpdatedAt:result.updated||'',googleStatus:result.status||'confirmed'
+ };
+ return {status:'synced',eventId,command,googleEtag:result.etag||''};
+}
+return {parseGoogleEvent,applyIncoming,collectPages,patchLinkedEvent,pushInternalEvent,eventIdentity};
 });
