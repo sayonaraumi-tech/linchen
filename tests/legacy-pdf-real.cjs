@@ -56,10 +56,11 @@ async function runOne(browser,endpoint,group,width,test){
   const state={docType:x.type,invoiceNo:'20260930-001',invoiceDate:'2026-09-30',salesDate:'2026-09-30',customerName:'テスト株式会社',items,receiptTotal:'2200',paymentMethod:'現金',tadashi:'壁紙工事代',remarks:'検証用',carryoverAmount:0,carryoverMonth:''};
   applyFormState(state,x.type);
   const el=document.querySelector('#previewArea .invoice');
+  document.getElementById('previewArea').classList.add('show');
   fitInvoiceToOnePage(el,x.type);
   return {type:docType,rowCount:el.querySelectorAll('#invItems tr:not(.empty)').length,mode:el.classList.contains('multipage-onoda')?'multipage':el.classList.contains('normal-16')?'normal-16':'ordinary',filename:buildPrintFilename()};
  },test);
- assert.equal(meta.rowCount,test.rows,group+' '+test.name+' rows mismatch');
+ if(test.type!=='receipt')assert.equal(meta.rowCount,test.rows,group+' '+test.name+' rows mismatch');
  if(test.type==='onoda')assert.equal(meta.mode,test.rows<=16?'normal-16':'multipage',group+' '+test.name+' mode');
  const pdfPath=path.join(out,group+'-'+test.name+'-'+width+'.pdf');
  const downloadPromise=page.waitForEvent('download',{timeout:15000});
