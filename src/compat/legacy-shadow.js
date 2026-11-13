@@ -16,7 +16,8 @@ const safeMoney=(value,name)=>{
  if(!Number.isSafeInteger(n)||n<0)throw Error(name+' must be a nonnegative integer JPY value');
  return n;
 };
-const isActive=x=>x&&!x.deletedAt&&x.status!=='void'&&x.status!=='cancelled'&&x.documentStatus!=='void';
+const INACTIVE=['void','cancelled','duplicate','revised'];
+const isActive=x=>!!x&&!x.deletedAt&&!INACTIVE.includes(x.status)&&!INACTIVE.includes(x.documentStatus);
 const confirmed=p=>p.confirmation==='cash-received'||p.confirmation==='bank-confirmed';
 function rowsOf(input){
  if(Array.isArray(input))return input;
@@ -61,18 +62,18 @@ function createShadow(dump,{requireFullExport=false}={}){
  const oldDocument=id=>get('documents',id);
  const oldSale=id=>get(String(id).startsWith('receivable_')?'receivables':'sales',id);
  const paymentsFor=id=>rows('payments').filter(p=>p.saleId===id&&isActive(p));
- function receivableRows(){
+ function receivableRows({asOf='9999-12-31'}={}){
   const anchors=[...rows('sales'),...rows('receivables')];
-  return anchors.filter(isActive).map(item=>{
+  return anchors.filter(isActive).filter(item=>(item.salesDate||item.saleDate||'')<=asOf).map(item=>{
    const id=String(item.id||item.saleId||item.receivableId||'');
    if(!id)throw Error('Legacy receivable anchor is missing an id');
    const amount=safeMoney(item.amount,'original sale/receivable amount');
-   const pays=paymentsFor(id);
+   const pays=paymentsFor(id).filter(p=>(p.paymentDate||p.date||'')<=asOf);
    const pending=pays.filter(x=>!confirmed(x)).reduce((n,p)=>n+safeMoney(p.amount,'pending payment'),0);
    const collected=pays.filter(confirmed).reduce((n,p)=>n+safeMoney(p.amount,'confirmed payment'),0);
    if(collected>amount||pending+collected>amount)throw Error('Legacy receivable overpaid or reserved: '+id);
    return {id,sourceCollection:String(id).startsWith('receivable_')?'receivables':'sales',
-    customer:item.customer||item.customerName||'',amount,confirmedPaid:collected,pending,
+    customer:item.customer||item.customerName||'',amount,receivableOnly:item.receivableOnly===true,confirmedPaid:collected,pending,
     outstanding:amount-collected,paymentIds:pays.map(p=>p.id||p.paymentId),
     originalId:id,readonly:true};
   });
@@ -106,7 +107,7 @@ function createShadow(dump,{requireFullExport=false}={}){
   }
   const ledger=receivableRows();
   return {readonly:true,orphanPayments,orphanDocuments,orphanCalendar,
-   totals:{anchors:ledger.length,amount:ledger.reduce((n,x)=>n+x.amount,0),
+   totals:{anchors:ledger.length,amount:ledger.filter(x=>!x.receivableOnly).reduce((n,x)=>n+x.amount,0),
     collected:ledger.reduce((n,x)=>n+x.confirmedPaid,0),
     outstanding:ledger.reduce((n,x)=>n+x.outstanding,0)},
    canPromote:false // a historical read-only shadow never authorizes migration
