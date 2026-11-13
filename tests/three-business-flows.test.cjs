@@ -66,3 +66,50 @@ test('cannot cancel a confirmed-payment receipt from generic payment void',()=>{
  assert.throws(()=>run(s,'void-pay',{type:'voidRecord',collection:'payments',id:pay.id,reason:'誤り'}),/領収書/);
  assert.equal(B.getOverview(s).cashIn,5000);
 });
+
+test('cancel restore customer, schedule and expense keeps audit and preserves cash ledger uniqueness',()=>{
+ let s=B.emptyState();
+ s=run(s,'customer',{type:'saveCustomer',name:'単独顧客',address:'東京都'});
+ s=run(s,'event',{type:'saveSchedule',date:'2026-11-18',title:'独立予定'});
+ s=run(s,'expense',{type:'saveExpense',expenseDate:'2026-11-18',vendor:'材料屋',category:'材料費',amount:800,paymentMethod:'現金'});
+ const ids={customers:B.list(s,'customers')[0].id,schedule:B.list(s,'schedule')[0].id,expenses:B.list(s,'expenses')[0].id};
+ for(const [collection,id] of Object.entries(ids))s=run(s,'void-'+collection,{type:'voidRecord',collection,id,reason:'確認'});
+ assert.equal(B.getOverview(s).expenses,0);
+ assert.equal(B.getOverview(s).cashOut,0);
+ for(const [collection,id] of Object.entries(ids))s=run(s,'restore-'+collection,{type:'restoreRecord',collection,id,confirmRestore:true});
+ assert.equal(B.getOverview(s).expenses,800);
+ assert.equal(B.getOverview(s).cashOut,800);
+ assert.equal(B.list(s,'cashLedger').length,1);
+ assert(B.list(s,'auditLogs').length>=9);
+});
+test('bank-matched expense cannot be cancelled without unmatching',()=>{
+ let s=B.emptyState();
+ s=run(s,'expense',{type:'saveExpense',expenseDate:'2026-11-13',vendor:'材料',category:'材料費',amount:900,paymentMethod:'銀行振込'});
+ s=run(s,'bank',{type:'importBankTransaction',account:'GMO',externalId:'out1',date:'2026-11-15',description:'材料',amount:900,direction:'outgoing'});
+ const expense=B.list(s,'expenses')[0],bank=B.list(s,'bankTransactions')[0];
+ s=run(s,'match',{type:'matchBankExpense',bankTxnId:bank.id,expenseId:expense.id});
+ assert.throws(()=>run(s,'void',{type:'voidRecord',collection:'expenses',id:expense.id,reason:'誤り'}),/照合解除/);
+ s=run(s,'unmatch',{type:'unmatchBank',bankTxnId:bank.id});
+ s=run(s,'void2',{type:'voidRecord',collection:'expenses',id:expense.id,reason:'訂正'});
+ assert.equal(B.getOverview(s).expenses,0);
+});
+test('operation ID replay with altered payload is rejected without additional booking',()=>{
+ let s=B.emptyState();
+ s=run(s,'same',{type:'saveExpense',expenseDate:'2026-11-13',vendor:'A',category:'材料費',amount:100,paymentMethod:'現金'});
+ const before=JSON.stringify(s);
+ assert.throws(()=>run(s,'same',{type:'saveExpense',expenseDate:'2026-11-13',vendor:'A',category:'材料費',amount:10000,paymentMethod:'現金'}),/同じ操作ID/);
+ assert.equal(JSON.stringify(s),before);
+});
+test('pending bank payment blocks direct sale cancellation even without bank match',()=>{
+ let s=B.emptyState();
+ s=run(s,'inv',{type:'issueDocument',docType:'invoice',sourceKey:'s',amount:1000,snapshot:{customerName:'A',invoiceDate:'2026-11-13',items:[]}});
+ const sale=B.list(s,'sales')[0];
+ s=run(s,'pending',{type:'registerPayment',saleId:sale.id,amount:1000,method:'銀行振込',paymentDate:'2026-11-13'});
+ assert.throws(()=>run(s,'void',{type:'voidRecord',collection:'sales',id:sale.id,reason:'誤り'}),/入金/);
+});
+test('converted estimate cannot be physically deleted while invoice references it',()=>{
+ let s=prepared();const quote=B.list(s,'documents')[0];
+ s=run(s,'convert',{type:'convertEstimateToInvoice',estimateId:quote.id});
+ assert.throws(()=>run(s,'del',{type:'deleteTestRecord',collection:'documents',id:quote.id,confirmTestDeletion:true}),/関連記録/);
+ assert.equal(B.list(s,'documents').length,2);
+});
