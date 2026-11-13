@@ -136,9 +136,40 @@ function operate(s,cmd){
   if(ev.registeredSaleId){a=requireRow(s,'sales',ev.registeredSaleId);break;}
   a=registerSale(s,'schedule:'+ev.id,{customer:ev.customer||ev.title,amount:c.amount,salesDate:c.salesDate||ev.date,description:ev.description,scheduleId:ev.id});
   ev.registeredSaleId=a.id;break;}
+ case 'acceptEstimate':{
+  const estimate=requireRow(s,'documents',c.estimateId);
+  if(estimate.docType!=='estimate'||!['active','accepted','accepted-undated'].includes(estimate.status))throw Error('受注できる見積書を選択してください');
+  const workDate=c.workDate?date(c.workDate,'施工予定日'):'';
+  if(estimate.acceptedScheduleId){
+   const ev=requireRow(s,'schedule',estimate.acceptedScheduleId);
+   if(!workDate&&ev.date)throw Error('日程確定後の予定日削除は専用変更手続が必要です');
+   if(workDate&&ev.date!==workDate){
+    if(ev.registeredSaleId)throw Error('売上登録済み予定は工事日を直接変更できません');
+    ev.date=workDate;
+    const project=row(s,'projects',ev.projectId);
+    if(project)project.workDate=workDate;
+    estimate.acceptedWorkDate=workDate;
+   }
+   a={estimateId:estimate.id,projectId:ev.projectId,scheduleId:ev.id,reused:true};break;
+  }
+  estimate.status=workDate?'accepted':'accepted-undated';
+  estimate.acceptedWorkDate=workDate;
+  if(!workDate){a={estimateId:estimate.id,projectId:'',scheduleId:'',reused:false};break;}
+  const project=write(s,'projects',{id:idFor(s,'project'),customer:estimate.customer,
+   estimateId:estimate.id,description:estimate.items.map(x=>x.content||'').filter(Boolean).join(' / '),
+   workDate,status:'active'});
+  const ev=write(s,'schedule',{id:idFor(s,'event'),date:workDate,title:project.description||'工事予定',
+   customer:estimate.customer,description:project.description,projectId:project.id,estimateId:estimate.id,
+   documentId:estimate.id,googleEventId:'',calendarId:'',googleUpdatedAt:'',
+   googleStatus:'confirmed',registeredSaleId:'',status:'active'});
+  estimate.acceptedProjectId=project.id;
+  estimate.acceptedScheduleId=ev.id;
+  a={estimateId:estimate.id,projectId:project.id,scheduleId:ev.id,reused:false};
+  break;
+ }
  case 'convertEstimateToInvoice':{
   const estimate=requireRow(s,'documents',c.estimateId);
-  if(estimate.docType!=='estimate'||estimate.status!=='active')throw Error('有効な見積書を選択してください');
+  if(estimate.docType!=='estimate'||!['active','accepted','accepted-undated'].includes(estimate.status))throw Error('有効な見積書を選択してください');
   const existing=rows(s,'documents').find(d=>d.docType==='invoice'&&d.estimateId===estimate.id);
   if(existing){
    if(!active(existing))throw Error('変換済請求書は無効です。訂正手続が必要です');
