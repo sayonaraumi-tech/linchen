@@ -1,7 +1,11 @@
 /* Deliberately test-scoped persistence adapter.
  * No production Firebase configuration or direct production data writes.
  */
-const B=require('../core/business');
+(function(root,factory){
+ const api=factory(typeof module==='object'&&module.exports?require('../core/business'):root.TsukinowaCoreBusiness);
+ if(typeof module==='object'&&module.exports)module.exports=api;
+ else root.TsukinowaSandboxStorage=api;
+})(typeof globalThis!=='undefined'?globalThis:this,function(B){
 function createSandboxStore({storage,key='tsukinowa_construction_sandbox_v1'}={}){
  if(!storage||typeof storage.getItem!=='function'||typeof storage.setItem!=='function')throw Error('A scoped storage adapter is required');
  const clone=x=>JSON.parse(JSON.stringify(x));
@@ -37,4 +41,5 @@ function createSandboxStore({storage,key='tsukinowa_construction_sandbox_v1'}={}
  }
  return {perform,snapshot,exportBackup,importBackup,storageKey:key};
 }
-module.exports={createSandboxStore};
+return {createSandboxStore};
+});
