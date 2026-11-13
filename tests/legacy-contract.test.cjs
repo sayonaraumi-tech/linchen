@@ -43,3 +43,20 @@ test('new system never directly reads production legacy storage keys',()=>{
  const original={...fake};C.validateLegacyDump({});
  assert.deepEqual(fake,original);
 });
+
+test('strict reference validation rejects orphaned legacy payment but partial exports are not assumed orphaned',()=>{
+ const dump={sales:[{id:'sale_1',amount:1100}],payments:[{id:'pay_1',saleId:'sale_missing',amount:1100}]};
+ const a=C.validateLegacyDump(dump);
+ assert(a.warnings.some(x=>x.code==='missing-referenced-record'&&x.collection==='payments'));
+ const b=C.validateLegacyDump(dump,{strictLinks:true});
+ assert(b.issues.some(x=>x.code==='missing-referenced-record'&&x.collection==='payments'));
+ const partial=C.validateLegacyDump({payments:dump.payments},{strictLinks:true});
+ assert.equal(partial.issues.some(x=>x.code==='missing-referenced-record'),false);
+});
+test('actual payload fields appear in per-collection data dictionary without copying customer content',()=>{
+ const dump={expenses:[{id:'expense_1',expenseDate:'2026-09-30',amount:1234,category:'材料費',vendor:'秘密会社'}]};
+ const r=C.validateLegacyDump(dump);
+ const fields=r.inventory.find(x=>x.legacyCollection==='expenses').observedFields;
+ assert(fields.includes('expenseDate')&&fields.includes('category')&&fields.includes('vendor'));
+ assert(!JSON.stringify(r.inventory).includes('秘密会社'));
+});
