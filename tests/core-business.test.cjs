@@ -32,7 +32,7 @@ test('cash receipt mirrors one sale, one confirmed payment and one cash line',()
  assert.equal(B.list(s,'sales').length,1);
  assert.equal(B.list(s,'payments').length,1);
  assert.equal(B.list(s,'cashLedger').length,1);
- assert.deepEqual(B.getOverview(s),{sales:11000,confirmedPayments:11000,outstanding:0,expenses:0,cashIn:11000,cashOut:0,salesCount:1,expenseCount:0});
+ assert.deepEqual(B.getOverview(s),{otherIncome:0,sales:11000,confirmedPayments:11000,outstanding:0,expenses:0,cashIn:11000,cashOut:0,salesCount:1,expenseCount:0});
 });
 test('bank pending payment is confirmed only by real matching bank row',()=>{
  let s=B.emptyState();
