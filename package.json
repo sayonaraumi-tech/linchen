@@ -6,12 +6,16 @@
   "scripts": {
     "test": "node --check app.js && node tests/ui-contract.cjs && node --test tests/legacy-standalone-receipt.cjs tests/legacy-payment-paths.cjs tests/legacy-bank-learning.cjs tests/legacy-expense-bank.cjs",
     "start": "node tools/server.cjs",
-    "test:browser": "node tests/browser-screenshots.cjs"
+    "test:browser": "node tests/browser-screenshots.cjs",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-tsukinowa \"node --test tests/legacy-firestore-rules.cjs\""
   },
   "engines": {
     "node": ">=18"
   },
   "devDependencies": {
-    "playwright": "1.58.2"
+    "playwright": "1.58.2",
+    "@firebase/rules-unit-testing": "5.0.1",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.11.0"
   }
 }
