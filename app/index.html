@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>月輪合同会社 — 独立業務テスト</title>
+<link rel="stylesheet" href="workbench.css"></head>
+<body><header><h1>月輪合同会社 — 独立業務テスト</h1><p><strong>TEST ONLY</strong>：この画面は第5段階の動作検証用。正式 Firebase・Google・既存データへの接続はありません。第6段階の完成 UI ではありません。</p></header>
+<main>
+<nav id="nav" aria-label="検証機能">
+<button type="button" data-page="home">HOME</button><button type="button" data-page="schedule">日程</button>
+<button type="button" data-page="documents">帳票</button><button type="button" data-page="history">帳票履歴</button>
+<button type="button" data-page="sales">売上・入金</button><button type="button" data-page="expenses">支出・現金</button>
+<button type="button" data-page="bank">銀行照合</button><button type="button" data-page="settings">設定</button>
+</nav>
+<section id="status" role="status" aria-live="polite"></section>
+<section id="page"></section>
+</main>
+<script src="../src/core/document-numbering.js"></script>
+<script src="../src/core/business.js"></script>
+<script src="../src/storage/sandbox.js"></script>
+<script src="../src/core/schedule-calendar.js"></script>
+<script src="workbench.js"></script>
+</body></html>

@@ -1,0 +1,25 @@
+{
+  "name": "tsukinowa-construction",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/serve-workbench.cjs",
+    "test": "node --test tests/core-business.test.cjs tests/views.test.cjs tests/sandbox.test.cjs tests/advanced-accounting.test.cjs tests/document-lifecycle.test.cjs tests/firestore-gateway.test.cjs tests/calendar-adapter.test.cjs tests/document-numbering.test.cjs tests/bank-import.test.cjs tests/outbox.test.cjs tests/frozen-pdf.test.cjs tests/schedule-calendar.test.cjs tests/platform-settlement.test.cjs tests/legacy-contract.test.cjs tests/legacy-shadow.test.cjs tests/legacy-ledger-parity.test.cjs tests/estimate-acceptance.test.cjs tests/outstanding-compat.test.cjs tests/supplier-reviewed.test.cjs tests/advanced-controls.test.cjs tests/historical-pdf-preview.test.cjs tests/bank-income-supplier-void.test.cjs tests/other-income-views.test.cjs tests/backup-restore.test.cjs tests/invoice-discount.test.cjs tests/command-service.test.cjs tests/three-business-flows.test.cjs",
+    "test:browser": "node --test tests/workbench-browser.cjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-tsukinowa-construction \"node --test tests/firestore-rules.test.cjs\"",
+    "audit:legacy": "node scripts/verify-legacy-data.cjs"
+  },
+  "dependencies": {
+    "firebase": "12.19.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.1",
+    "firebase-tools": "15.11.0",
+    "playwright": "1.62.1",
+    "html2pdf.js": "0.10.1"
+  }
+}
