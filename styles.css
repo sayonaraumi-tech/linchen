@@ -3,3 +3,9 @@
 .sidebar.compact:not(.locked):hover{width:56px}
 
 .sidebar.suppress-hover:not(.locked):hover{width:56px}
+
+/* Keep compact navigation controls within visible 56px rail; never horizontal-scroll their icons. */
+.sidebar nav{width:100%;min-width:0}
+.sidebar .navbtn{width:100%;min-width:0}
+.sidebar .pin{width:calc(100% - 14px);min-width:0;overflow:hidden;white-space:nowrap}
+.sidebar .brand{overflow:hidden}
