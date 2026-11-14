@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - feature/desktop-ui-v1-20261114
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 jobs:
   ui-and-domain:
