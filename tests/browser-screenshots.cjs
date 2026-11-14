@@ -47,6 +47,11 @@ const server=http.createServer((req,res)=>{
   await page.locator(".navbtn").nth(5).click();
   await page.locator(".content-table tbody tr").nth(1).click();
   assert.match(await page.locator("#content").innerText(),/INV-026-102/);
+  await page.locator(".navbtn").nth(3).click();
+  await page.locator('[data-action="sandbox-receipt"]').click();
+  await page.waitForFunction(()=>globalThis.TsukinowaSandbox?.counts().sales===1,{timeout:10000});
+  const totals=await page.evaluate(()=>globalThis.TsukinowaSandbox.counts());
+  assert.equal(totals.sales,1);assert.equal(totals.payments,1);assert.equal(totals.cashLedger,1);
   assert.equal(failures.length,0,"Browser JS errors: "+failures.join("; "));
   console.log("PASS: nine real screenshots, page navigation, sidebar, cash tabs, bank filter, row detail. Output: screenshots/");
  }finally{await browser.close();server.close();}
