@@ -20,6 +20,10 @@ const server=http.createServer((req,res)=>{
    await page.locator(".navbtn").nth(i).click();
    await page.mouse.move(1250,77);
    await page.waitForTimeout(220);
+   const rail=await page.locator("#sidebar").boundingBox();
+   const icon=await page.locator(".navbtn.active .nav-icon").boundingBox();
+   assert(rail.width===56 && icon.x>=0 && icon.x+icon.width<=56,"Collapsed sidebar must expose active icon");
+   assert.equal(await page.locator("#sidebar").evaluate(e=>e.scrollLeft),0,"Sidebar should never scroll horizontally");
    await assert.equal(await page.locator("#pageTitle").innerText(),expected[i]);
    await page.screenshot({path:path.join(out,String(i+1).padStart(2,"0")+"-"+["home","calendar","estimates","documents","saved-documents","sales-payments","expenses-cash","bank-reconciliation","settings"][i]+".png"),fullPage:true});
   }
