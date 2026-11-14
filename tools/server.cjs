@@ -1,0 +1,3 @@
+const http=require("node:http"),fs=require("node:fs"),path=require("node:path");
+const root=path.resolve(__dirname,"..");const mime={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".css":"text/css; charset=utf-8"};
+http.createServer((req,res)=>{const route=new URL(req.url,"http://localhost").pathname;const file=path.join(root,route==="/"?"/index.html":route);if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}fs.readFile(file,(err,data)=>{if(err){res.writeHead(404).end();return;}res.setHeader("Content-Type",mime[path.extname(file)]||"application/octet-stream");res.setHeader("Cache-Control","no-store");res.end(data);});}).listen(8766,"127.0.0.1",()=>console.log("UI preview: http://127.0.0.1:8766"));
