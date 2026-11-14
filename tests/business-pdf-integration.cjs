@@ -12,13 +12,13 @@ const bundle=require.resolve('html2pdf.js/dist/html2pdf.bundle.min.js');
 fs.mkdirSync(out,{recursive:true});
 const cases=[
  {docType:'estimate',rows:2,pages:1},{docType:'invoice',rows:2,pages:1},
- {docType:'receipt',rows:2,pages:1},{docType:'onoda',rows:16,pages:1},
+ {docType:'receipt',rows:2,pages:1},{docType:'invoice',rows:3,pages:1,discount:true}, {docType:'onoda',rows:16,pages:1},
  {docType:'onoda',rows:17,pages:2}
 ];
 function createFormal(caseSpec){
  let s=Business.emptyState('test');
  const items=Array.from({length:caseSpec.rows},(_,i)=>({
-  content:'クロス張替 '+String(i+1),qty:1,price:1000,taxable:true,unit:'式'
+  content:caseSpec.discount&&i===caseSpec.rows-1?'値引き':'クロス張替 '+String(i+1),qty:1,price:caseSpec.discount&&i===caseSpec.rows-1?-500:1000,taxable:true,unit:'式'
  }));
  const snapshot={
   docType:caseSpec.docType,customerName:'合成テスト会社',invoiceDate:'2026-09-30',
@@ -28,11 +28,12 @@ function createFormal(caseSpec){
  const cmd={type:'issueDocument',operationId:'pdf-'+caseSpec.docType+'-'+caseSpec.rows,
   sourceKey:'pdf-'+caseSpec.docType+'-'+caseSpec.rows,
   docType:caseSpec.docType,issuedAt:'2026-11-13T04:15:00Z',
-  amount:Math.max(1100,caseSpec.rows*1100),snapshot};
+  amount:caseSpec.discount?1650:Math.max(1100,caseSpec.rows*1100),snapshot};
  const result=Business.perform(s,cmd);s=result.state;
  const document=result.result.document;
  assert.equal(Business.list(s,'documents').length,1);
  assert(document.invoiceNo.startsWith('20261113-1315-'));
+ if(caseSpec.discount){assert.equal(document.amount,1650);assert.equal(Business.list(s,'sales')[0].amount,1650);assert.equal(document.snapshot.items.at(-1).price,-500);}
  return {document,state:s};
 }
 function serve(root){return new Promise(resolve=>{
@@ -81,11 +82,12 @@ async function pdf(browser,url,kind,caseSpec,width,document,state){
   const current=collectFormState();
   if(current.customerName!==snap.customerName||current.invoiceNo!==snap.invoiceNo)throw Error('Snapshot mapping changed');
   if(current.invoiceDate!==snap.invoiceDate||current.docType!==doc.docType)throw Error('Document metadata changed');
-  return {filename:buildPrintFilename(),actualRows:invoice.querySelectorAll('#invItems tr:not(.empty)').length,
+  return {filename:buildPrintFilename(),actualRows:invoice.querySelectorAll('#invItems tr:not(.empty)').length,hasDiscount:[...invoice.querySelectorAll('#invItems tr:not(.empty)')].some(row=>row.textContent.includes('値引き')&&row.textContent.includes('-500')),tax:document.getElementById('dTax').textContent,grand:document.getElementById('dGrandTotal').textContent,
    pageMode:invoice.classList.contains('multipage-onoda')?'multi':'single',
    number:current.invoiceNo,customer:current.customerName};
  },{doc:document});
  if(caseSpec.docType!=='receipt')assert.equal(values.actualRows,caseSpec.rows);
+ if(caseSpec.discount){assert.equal(values.hasDiscount,true,'discount negative row rendered');assert.match(values.tax,/150/);assert.match(values.grand,/1,650/);}
  if(caseSpec.docType==='onoda')assert.equal(values.pageMode,caseSpec.rows<=16?'single':'multi');
  await p.evaluate(async()=>{
   await document.fonts.ready;
