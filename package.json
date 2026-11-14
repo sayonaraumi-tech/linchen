@@ -4,10 +4,14 @@
   "private": true,
   "description": "Isolated UI preview (no production persistence)",
   "scripts": {
-    "test": "node --check app.js && node tests/ui-contract.cjs",
-    "start": "node tools/server.cjs"
+    "test": "node --check app.js && node tests/ui-contract.cjs && node --test tests/legacy-standalone-receipt.cjs tests/legacy-payment-paths.cjs tests/legacy-bank-learning.cjs tests/legacy-expense-bank.cjs",
+    "start": "node tools/server.cjs",
+    "test:browser": "node tests/browser-screenshots.cjs"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
   }
 }
