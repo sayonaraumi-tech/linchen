@@ -1,0 +1,242 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function member(c) { return request.auth != null && request.auth.token.companyId == c && request.auth.token.role in ['admin','staff']; }
+  function admin(c) { return member(c) && request.auth.token.role == 'admin'; }
+  function core(n) { return n in ['calendarLinks','estimates','projects','documents','sales','receivables','payments']; }
+  function business(n) { return core(n) || n in ['expenses','suppliers','cashLedger','settings','bankTransactions','supplierTransactions','migrations']; }
+  function before(c,n,id) { return exists(/databases/$(database)/documents/companies/$(c)/$(n)/$(id)) ? get(/databases/$(database)/documents/companies/$(c)/$(n)/$(id)).data.payload : null; }
+  // Select the known audit shape before fetching: existing rows need one get,
+  // new rows need one exists. This preserves the before-image check while keeping
+  // multi-order bank settlements within Firestore's 20-call transaction budget.
+  function auditBefore(c,n,id,expected) {
+   return expected==null ? !exists(/databases/$(database)/documents/companies/$(c)/$(n)/$(id)) : expected==get(/databases/$(database)/documents/companies/$(c)/$(n)/$(id)).data.payload;
+  }
+  // Historical cancellation is deliberately unavailable in this release. Never
+  // infer absence of reverse references from a browser collection scan.
+  // Freeze existing tombstones too: restoring one has the same reference race.
+  function bankHistoryGuard(c,n,id) {
+   return n!='bankTransactions' || bankHistoryPayloadGuard(c,n,id);
+  }
+  function bankHistoryPayloadGuard(c,n,id) {
+   let p=request.resource.data.payload;
+   let old=before(c,n,id);
+   return (!(p.get('status','') in ['void','cancelled','duplicate','revised'])
+     && !(p.get('documentStatus','') in ['void','cancelled','duplicate','revised']) && !p.keys().hasAny(['duplicateCancellation'])
+     && p.get('deletedAt',null)==null
+     && (old==null || (!(old.get('status','') in ['void','cancelled','duplicate','revised'])
+      && !(old.get('documentStatus','') in ['void','cancelled','duplicate','revised'])
+      && !old.keys().hasAny(['duplicateCancellation']) && old.get('deletedAt',null)==null)));
+  }
+  function valid(c,n,id) {
+   let d=request.resource.data;
+   let op=getAfter(/databases/$(database)/documents/companies/$(c)/operations/$(d.lastOperationId)).data;
+   let a=getAfter(/databases/$(database)/documents/companies/$(c)/auditLogs/$(d.lastAuditId)).data;
+   return d.keys().hasOnly(['schemaVersion','companyId','payload','revision','createdBy','updatedBy','updatedAt','createdAt','lastOperationId','lastAuditId'])
+    && bankHistoryGuard(c,n,id)
+    && d.schemaVersion==2 && d.companyId==c && d.payload is map && d.revision is int && d.revision>0
+    && d.createdAt is timestamp
+    && d.updatedBy==request.auth.uid && d.updatedAt==request.time
+    && (n!='documents' || (!exists(/databases/$(database)/documents/companies/$(c)/documents/$(id)) || (d.payload.documentId==resource.data.payload.documentId && d.payload.docType==resource.data.payload.docType)))
+    && op.actorId==request.auth.uid && op.createdAt==request.time
+    && a.userId==request.auth.uid && a.timestamp==request.time && a.entityType==n && a.entityId==id
+    && a.operationId==d.lastOperationId && a.after==d.payload && auditBefore(c,n,id,a.before);
+  }
+  function cashMirror(c,id,p) {
+   let payment=getAfter(/databases/$(database)/documents/companies/$(c)/payments/$(p.linkedPaymentId)).data.payload;
+   return p.linkedPaymentId!='' && id=='cash_'+p.linkedPaymentId && p.cashTxnId==id
+    && p.linkedExpenseId=='' && p.linkedSupplierTransactionId==''
+    && ((p.deletedAt==null && payment.confirmation=='cash-received' && payment.get('deletedAt',null)==null && p.amount==payment.amount && p.date==payment.paymentDate && p.type=='income')
+      || (p.deletedAt is string && (payment.confirmation!='cash-received' || payment.get('deletedAt',null)!=null)));
+  }
+  function active(p) { return p.get('status','active')=='active' && p.get('documentStatus','active')=='active' && p.get('deletedAt',null)==null; }
+  function receiptBackfill(c,id,p) {
+   return resource.data.payload.docType=='receipt' && active(resource.data.payload)
+    && resource.data.payload.get('saleId','')=='' && resource.data.payload.snapshot.get('saleId','')==''
+    && resource.data.payload.snapshot.paymentMethod=='現金' && resource.data.payload.amount>0
+    && (p.saleId=='sale_'+id && p.paymentId=='pay_'+id || resource.data.payload.get('calendarEventId','')!='' && p.saleId==getAfter(/databases/$(database)/documents/companies/$(c)/calendarLinks/$(resource.data.payload.calendarEventId)).data.payload.cashSaleId && p.paymentId=='pay_'+p.saleId)
+    && p.diff(resource.data.payload).affectedKeys().hasOnly(['saleId','paymentId'])
+    && getAfter(/databases/$(database)/documents/companies/$(c)/sales/$(p.saleId)).data.payload.sourceType=='receipt-cash'
+    && getAfter(/databases/$(database)/documents/companies/$(c)/payments/$(p.paymentId)).data.payload.amount==p.amount;
+  }
+  function documentGuard(c,n,id) {
+   let p=request.resource.data.payload;
+   return n!='documents' || (p.documentId==id && p.get('status','active') in ['active','void','cancelled','duplicate','revised']
+    && (!exists(/databases/$(database)/documents/companies/$(c)/documents/$(id))
+      ? (p.get('status','active')=='active' && (admin(c)||(p.get('revisedFromDocumentId','')=='' && p.get('sourceType','')!='historicalPdfImport')))
+      : (p.snapshot==resource.data.payload.snapshot && (receiptBackfill(c,id,p) || receiptAccountingRepair(c,id,p) ||
+        (admin(c) && resource.data.payload.get('status','active') in ['void','duplicate','revised','cancelled'] && resource.data.payload.get('deletedAt',null)==null && p.deletedAt is string && p.deleteReason=='履歴から削除' && p.diff(resource.data.payload).affectedKeys().hasOnly(['deletedAt','deleteReason'])) ||
+        (admin(c) && p.diff(resource.data.payload).affectedKeys().hasOnly(['status','reason','revisedToDocumentId','duplicateOfDocumentId'])
+        && resource.data.payload.get('status','active')=='active' && p.status in ['void','cancelled','duplicate','revised'] && p.reason is string && p.reason.size()>0)))));
+  }
+  function receiptAccountingRepair(c,id,p) {
+   let old=resource.data.payload;
+   let sale=getAfter(/databases/$(database)/documents/companies/$(c)/sales/$(p.saleId)).data.payload;
+   let payment=getAfter(/databases/$(database)/documents/companies/$(c)/payments/$(p.paymentId)).data.payload;
+   let link=getAfter(/databases/$(database)/documents/companies/$(c)/calendarLinks/$(p.calendarEventId)).data.payload;
+   return admin(c) && old.docType=='receipt' && active(old) && active(p) && old.amount>0
+    && p.diff(old).affectedKeys().hasOnly(['saleId','paymentId','calendarEventId','googleEventId','calendarId','paymentDate'])
+    && active(sale) && sale.amount==old.amount && sale.customer==old.snapshot.customerName
+    && payment.documentId==id && payment.saleId==p.saleId && payment.amount==old.amount
+    && payment.paymentDate==p.paymentDate && payment.method==old.snapshot.paymentMethod && payment.get('deletedAt',null)==null
+    && ((payment.method=='現金' && payment.confirmation=='cash-received') || (payment.method in ['銀行振込','プラットフォーム経由','その他','オンライン決済'] && payment.confirmation=='bank-confirmed'))
+    && link.linkedReceiptId==id && link.receiptSaleId==p.saleId && link.saleId==p.saleId
+    && link.officialAmount==old.amount && link.customerName==old.snapshot.customerName && link.status=='領収済'
+    && link.googleEventId==p.googleEventId;
+  }
+  function paymentGuard(c,n,id) {
+   let p=request.resource.data.payload;
+   let targetCollection=p.saleId.matches('receivable_.*')?'receivables':'sales';
+   let sale=getAfter(/databases/$(database)/documents/companies/$(c)/$(targetCollection)/$(p.saleId));
+   return sale.data.payload.paymentIds.hasAny([id]) && (sale.data.lastOperationId==request.resource.data.lastOperationId || (admin(c) && resource!=null && platformPaymentEvidence(c,id,p)))
+     && (p.get('deletedAt',null)!=null || active(sale.data.payload));
+  }
+  // Admin-only evidence updates keep all economic/identity fields immutable.
+  // The bank and its allocation list must be committed in this same operation.
+  function platformPaymentEvidence(c,id,p) {
+   let old=resource.data.payload;
+   let bankId=p.get('bankTxnId','')!=''?p.bankTxnId:old.get('bankTxnId','');
+   let bank=getAfter(/databases/$(database)/documents/companies/$(c)/bankTransactions/$(bankId));
+   let fields=p.diff(old).affectedKeys();
+   return bankId!='' && bank.data.lastOperationId==request.resource.data.lastOperationId
+    && p.amount==old.amount && p.saleId==old.saleId
+    && old.confirmation in ['pending-bank','bank-confirmed']
+    && fields.hasOnly(['confirmation','paymentDate','date','bankTxnId','bankTransactionDate','platformStatement'])
+    && ((bank.data.payload.status=='照合済' && bank.data.payload.matchType=='platformSettlement'
+      && bank.data.payload.platformPayments.hasAny([{'id':id,'amount':p.amount}])
+      && p.confirmation=='bank-confirmed' && p.bankTxnId==bankId
+      && p.bankTransactionDate==bank.data.payload.bankTransactionDate)
+     || (bank.data.payload.status=='未照合' && bank.data.payload.matchType==''
+      && p.get('bankTxnId','')=='' && old.bankTxnId==bankId && p.confirmation in ['pending-bank','bank-confirmed']
+      && before(c,'bankTransactions',bankId).matchType=='platformSettlement'));
+  }
+  function calendarCashSale(c,id,p) {
+   let link=getAfter(/databases/$(database)/documents/companies/$(c)/calendarLinks/$(p.calendarEventId));
+   return p.get('sourceType','')=='calendar-cash' && p.documentId=='' && id=='calendar_cash_'+p.calendarEventId
+    && link.data.lastOperationId==request.resource.data.lastOperationId
+    && link.data.payload.get('linkedInvoiceId','')=='' && link.data.payload.get('documentId','')==''
+    && link.data.payload.cashSaleId==id && link.data.payload.paymentMethod=='現金'
+    && link.data.payload.amount==p.amount && p.amount>0 && link.data.payload.customerName==p.customer
+    && link.data.payload.date==p.salesDate && p.invoiceDate=='';
+  }
+  function calendarCashPayment(c,id,p) {
+   let sale=getAfter(/databases/$(database)/documents/companies/$(c)/sales/$(p.saleId));
+   return p.get('sourceType','')=='calendar-cash' && p.documentId=='' && id=='pay_'+p.saleId
+    && sale.data.lastOperationId==request.resource.data.lastOperationId
+    && sale.data.payload.get('sourceType','')=='calendar-cash' && sale.data.payload.documentId==''
+    && sale.data.payload.amount==p.amount && sale.data.payload.salesDate==p.paymentDate
+    && p.confirmation=='cash-received' && p.method=='現金' && p.get('deletedAt',null)==null;
+  }
+  function isolatedError(p) {
+   return p.get('sourceType','')=='system-error' && p.get('confirmed',false)!=true
+    && p.get('invoiceNo','')=='' && p.get('snapshot',{}).get('invoiceNo','')==''
+    && p.get('saleId','')=='' && p.get('receivableId','')=='' && p.get('paymentId','')==''
+    && p.get('calendarEventId','')=='' && p.get('googleEventId','')=='' && p.get('projectId','')=='' && p.get('estimateId','')==''
+    && p.get('revisedFromDocumentId','')=='' && p.get('revisedToDocumentId','')=='' && p.get('duplicateOfDocumentId','')=='';
+  }
+  function errorDeletion(c,id) {
+   let op=getAfter(/databases/$(database)/documents/companies/$(c)/operations/$('delete_error_'+id+'_'+string(resource.data.revision))).data;
+   let audit=getAfter(/databases/$(database)/documents/companies/$(c)/auditLogs/$('delete_error_'+id+'_'+string(resource.data.revision)+'_0')).data;
+   return admin(c) && isolatedError(resource.data.payload) && op.actorId==request.auth.uid && op.createdAt==request.time
+    && op.result.backup==resource.data.payload && op.result.backupRevision==resource.data.revision && op.result.reason.size()>0
+    && audit.action=='misregistration delete' && audit.before==resource.data.payload && audit.after==null
+    && !exists(/databases/$(database)/documents/companies/$(c)/sales/$('sale_'+id))
+    && !exists(/databases/$(database)/documents/companies/$(c)/receivables/$('receivable_'+id))
+    && !exists(/databases/$(database)/documents/companies/$(c)/payments/$('pay_'+id))
+    && !exists(/databases/$(database)/documents/companies/$(c)/estimates/$('est_'+id));
+  }
+  function receiptCashSale(c,id,p) {
+   let d=getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId));
+   return p.get('sourceType','') in ['receipt-cash','receipt'] && (id=='sale_'+p.documentId || exists(/databases/$(database)/documents/companies/$(c)/sales/$(id)) && resource.data.payload.get('sourceType','') in ['calendar-cash','calendar-manual'] && resource.data.payload.get('documentId','')=='' && id=='calendar_cash_'+resource.data.payload.calendarEventId && d.data.payload.calendarEventId==resource.data.payload.calendarEventId && p.amount==resource.data.payload.amount && p.salesDate==resource.data.payload.salesDate) && p.sourceId==p.documentId
+    && d.data.lastOperationId==request.resource.data.lastOperationId && d.data.payload.docType=='receipt'
+    && d.data.payload.snapshot.get('saleId','') in ['',id] && d.data.payload.snapshot.paymentMethod==p.paymentMethod
+    && d.data.payload.saleId==id && d.data.payload.amount==p.amount && p.amount>0
+    && d.data.payload.customerName==p.customer && p.customer.size()>0
+    && d.data.payload.invoiceDate==p.salesDate && p.saleDate==p.salesDate && p.invoiceDate=='';
+  }
+  function formalReceiptPayment(c,id,p) {
+   let d=getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId));
+   let old=before(c,'payments',id);
+   return d.data.lastOperationId==request.resource.data.lastOperationId
+    && d.data.payload.docType=='receipt' && active(d.data.payload)
+    && d.data.payload.saleId==p.saleId && d.data.payload.paymentId==id && p.paymentId==id
+    && d.data.payload.amount==p.amount && p.amount>0
+    && d.data.payload.paymentDate==p.paymentDate && p.date==p.paymentDate
+    && d.data.payload.snapshot.paymentMethod==p.method
+    && ((p.method=='現金' && p.confirmation=='cash-received') || (p.method in ['銀行振込','プラットフォーム経由','その他','オンライン決済'] && p.confirmation=='bank-confirmed'))
+    && (old==null || (old.get('documentId','')=='' && old.get('deletedAt',null)==null && old.saleId==p.saleId && old.amount==p.amount && old.paymentDate==p.paymentDate && old.method==p.method && old.confirmation==p.confirmation && old.get('bankTxnId','')==p.get('bankTxnId','')));
+  }
+  function receiptCashPayment(c,id,p) {
+   let d=getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId));
+   return exists(/databases/$(database)/documents/companies/$(c)/payments/$(id))
+    && resource.data.payload.get('sourceType','')=='calendar-cash' && resource.data.payload.get('documentId','')==''
+    && resource.data.payload.get('deletedAt',null)==null && resource.data.payload.get('bankTxnId','')==''
+    && p.amount==resource.data.payload.amount && p.paymentDate==resource.data.payload.paymentDate
+    && p.saleId==resource.data.payload.saleId && p.confirmation=='cash-received' && p.method=='現金'
+    && d.data.payload.docType=='receipt' && d.data.payload.saleId==p.saleId && d.data.payload.paymentId==id
+    && d.data.payload.amount==p.amount && d.data.payload.invoiceDate==p.paymentDate
+    && d.data.lastOperationId==request.resource.data.lastOperationId;
+  }
+  function calendarCashReview(c,id,p) {
+   let link=getAfter(/databases/$(database)/documents/companies/$(c)/calendarLinks/$(p.calendarEventId));
+   return exists(/databases/$(database)/documents/companies/$(c)/sales/$(id))
+    && resource.data.payload.get('sourceType','')=='calendar-cash'
+    && p.diff(resource.data.payload).affectedKeys().hasOnly(['accountingReviewRequired','reviewReason'])
+    && p.accountingReviewRequired==true && link.data.payload.accountingReviewRequired==true
+    && link.data.lastOperationId==request.resource.data.lastOperationId;
+  }
+  function staffWrite(c,n,id) {
+   let p=request.resource.data.payload;
+   let old=before(c,n,id);
+   return (p.get('manualConfirmed',false)==(old==null?false:old.get('manualConfirmed',false)))
+    && (n!='calendarLinks' || (p.get('manualSaleConfirmed',false)==(old==null?false:old.get('manualSaleConfirmed',false)) && p.get('saleId','')==(old==null?'':old.get('saleId',''))))
+    && ((n=='cashLedger' && cashMirror(c,id,p))
+    || n in ['calendarLinks','estimates','projects']
+    || (n=='documents' && p.documentId==id && p.confirmed==true && p.docType in ['invoice','onoda','estimate','receipt'] && p.snapshot.documentId==id && p.snapshot.docType==p.docType && p.get('sourceType','')!='historicalPdfImport' && p.snapshot.get('sourceType','')!='historicalPdfImport')
+    || (n=='receivables' && exists(/databases/$(database)/documents/companies/$(c)/receivables/$(id)) && active(p) && p.diff(resource.data.payload).affectedKeys().hasOnly(['paymentIds','paymentVersion']) && p.paymentIds.hasAll(resource.data.payload.get('paymentIds',[])) && p.paymentVersion==resource.data.payload.get('paymentVersion',0)+1)
+    || (n=='sales' && active(p) && (calendarCashSale(c,id,p) || receiptCashSale(c,id,p) || calendarCashReview(c,id,p) || (exists(/databases/$(database)/documents/companies/$(c)/sales/$(id)) && p.diff(resource.data.payload).affectedKeys().hasOnly(['paymentIds','paymentVersion']) && p.paymentIds.hasAll(resource.data.payload.get('paymentIds',[])) && p.paymentVersion==resource.data.payload.get('paymentVersion',0)+1) || ((id=='sale_'+p.documentId || (exists(/databases/$(database)/documents/companies/$(c)/sales/$(id)) && resource.data.payload.get('sourceType','') in ['calendar-cash','calendar-manual'] && resource.data.payload.documentId=='' && getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId)).data.payload.saleId==id && (getAfter(/databases/$(database)/documents/companies/$(c)/calendarLinks/$(p.calendarEventId)).data.payload.get('cashSaleId','')==id || getAfter(/databases/$(database)/documents/companies/$(c)/calendarLinks/$(p.calendarEventId)).data.payload.get('saleId','')==id)))
+      && getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId)).data.payload.docType in ['invoice','onoda']
+      && getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId)).data.payload.amount==p.amount
+      && getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId)).data.payload.customerName==p.customer
+      && getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId)).data.payload.salesDate==p.salesDate
+      && getAfter(/databases/$(database)/documents/companies/$(c)/documents/$(p.documentId)).data.payload.invoiceDate==p.invoiceDate)))
+    || (n=='payments' && (calendarCashPayment(c,id,p)||receiptCashPayment(c,id,p)||formalReceiptPayment(c,id,p)))
+    || (n=='payments' && p.paymentId==id && p.amount>0 && p.confirmation in ['cash-received','pending-bank']
+      && (existsAfter(/databases/$(database)/documents/companies/$(c)/sales/$(p.saleId)) || existsAfter(/databases/$(database)/documents/companies/$(c)/receivables/$(p.saleId)))
+      && !exists(/databases/$(database)/documents/companies/$(c)/payments/$(id))));
+  }
+  match /companies/{c}/{n}/{id} {
+   allow read: if business(n) && (admin(c) || (member(c) && (core(n) || (n=='settings' && id=='system'))));
+   allow create: if business(n) && member(c) && (admin(c)||staffWrite(c,n,id)) && documentGuard(c,n,id) && (n!='payments'||paymentGuard(c,n,id)) && valid(c,n,id) && request.resource.data.revision==1 && request.resource.data.createdBy==request.auth.uid && request.resource.data.createdAt==request.time;
+   allow update: if business(n) && member(c) && (admin(c)||staffWrite(c,n,id)) && documentGuard(c,n,id) && (n!='payments'||paymentGuard(c,n,id)) && valid(c,n,id) && request.resource.data.revision==resource.data.revision+1 && request.resource.data.createdBy==resource.data.createdBy && (!resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt==resource.data.createdAt);
+   allow delete: if n=='documents' && errorDeletion(c,id);
+  }
+  match /companies/{c}/cashLedger/{id} {
+   allow get: if member(c) && (!exists(/databases/$(database)/documents/companies/$(c)/cashLedger/$(id)) || resource.data.payload.linkedPaymentId!='');
+  }
+  match /companies/{c}/operations/{id} {
+   allow read: if member(c);
+   allow create: if member(c) && (!id.matches('historical_.*') || admin(c)) && request.resource.data.keys().hasOnly(['actorId','fingerprint','result','createdAt']) && request.resource.data.actorId==request.auth.uid && request.resource.data.fingerprint is string && request.resource.data.result is map && request.resource.data.createdAt==request.time;
+   allow update,delete: if false;
+  }
+  match /companies/{c}/auditLogs/{id} {
+   allow read: if admin(c);
+   allow create: if member(c)
+    && request.resource.data.keys().hasOnly(['userId','timestamp','entityType','entityId','action','before','after','operationId','documentId','oldStatus','newStatus','reason','revisedFromDocumentId','duplicateOfDocumentId','invoiceNo','sourceFileName','sourceHash','linkedSaleId','whetherCreatedSale'])
+    && request.resource.data.userId==request.auth.uid && request.resource.data.timestamp==request.time
+    && ((admin(c) && request.resource.data.entityType=='documents' && request.resource.data.action=='misregistration delete' && isolatedError(request.resource.data.before) && request.resource.data.after==null && !existsAfter(/databases/$(database)/documents/companies/$(c)/documents/$(request.resource.data.entityId)) && getAfter(/databases/$(database)/documents/companies/$(c)/operations/$(request.resource.data.operationId)).data.result.backup==request.resource.data.before)
+    || (admin(c) && request.resource.data.entityType=='auditLogs' && request.resource.data.entityId==id && request.resource.data.action=='migration' && request.resource.data.before==null && request.resource.data.after.legacy is map
+      && getAfter(/databases/$(database)/documents/companies/$(c)/operations/$(request.resource.data.operationId)).data.actorId==request.auth.uid
+      && getAfter(/databases/$(database)/documents/companies/$(c)/operations/$(request.resource.data.operationId)).data.createdAt==request.time)
+    || (business(request.resource.data.entityType)
+    && request.resource.data.action in ['create','update','status change','payment','migration','expense create','expense update','expense delete','cash transaction','supplier transaction','bank csv import','bank match confirm','payment confirm','adjustment','historicalPdfImport']
+    && (!(request.resource.data.action in ['migration','historicalPdfImport'])||admin(c))
+    && getAfter(/databases/$(database)/documents/companies/$(c)/$(request.resource.data.entityType)/$(request.resource.data.entityId)).data.lastAuditId==id
+    && getAfter(/databases/$(database)/documents/companies/$(c)/$(request.resource.data.entityType)/$(request.resource.data.entityId)).data.updatedAt==request.time
+    && auditBefore(c,request.resource.data.entityType,request.resource.data.entityId,request.resource.data.before)
+    && request.resource.data.after==getAfter(/databases/$(database)/documents/companies/$(c)/$(request.resource.data.entityType)/$(request.resource.data.entityId)).data.payload));
+   allow update,delete: if false;
+  }
+  match /{document=**} { allow read,write: if false; }
+ }
+}
