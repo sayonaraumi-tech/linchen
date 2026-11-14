@@ -1,0 +1,10 @@
+const fs=require("node:fs"),assert=require("node:assert/strict");
+const html=fs.readFileSync("index.html","utf8"),css=fs.readFileSync("styles.css","utf8"),js=fs.readFileSync("app.js","utf8");
+for(const page of ["ホーム","日程","見積履歴","帳票","保存帳票","売上・入金","支出・現金","銀行照合","設定"])assert(js.includes('"'+page+'"'),"Missing page: "+page);
+assert(html.includes('id="sidebar"'));assert(html.includes('id="content"'));
+assert(css.includes("#171717")&&css.includes("#b99755")&&css.includes("#f5f5f3"));
+assert(js.includes('URL.createObjectURL(file)'),"PDF must preview the original selected PDF");
+assert(!js.includes("firebase.initializeApp"),"Demo must not connect to production");
+assert(!html.includes("firebase-config"),"Preview must not load production Firebase");
+assert(js.includes("DEMO DATA")||html.includes("DEMO DATA"));
+console.log("UI contract: 9 pages, sidebar, palette, real-file PDF preview, isolation: PASS");
