@@ -1,0 +1,25 @@
+name: Desktop UI and legacy domain regression
+on:
+  push:
+    branches:
+      - feature/desktop-ui-v1-20261114
+  workflow_dispatch:
+jobs:
+  ui-and-domain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nine-desktop-ui-screenshots
+          path: screenshots/*.png
+          if-no-files-found: warn
