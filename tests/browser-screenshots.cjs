@@ -18,6 +18,8 @@ const server=http.createServer((req,res)=>{
   const expected=["ホーム","日程","見積履歴","帳票","保存帳票","売上・入金","支出・現金","銀行照合","設定"];
   for(let i=0;i<expected.length;i++){
    await page.locator(".navbtn").nth(i).click();
+   await page.mouse.move(1250,77);
+   await page.waitForTimeout(220);
    await assert.equal(await page.locator("#pageTitle").innerText(),expected[i]);
    await page.screenshot({path:path.join(out,String(i+1).padStart(2,"0")+"-"+["home","calendar","estimates","documents","saved-documents","sales-payments","expenses-cash","bank-reconciliation","settings"][i]+".png"),fullPage:true});
   }
