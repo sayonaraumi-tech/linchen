@@ -61,6 +61,10 @@ const server=http.createServer((req,res)=>{
   await page.locator("#discount").check();
   await page.locator("#discountValue").fill("500");
   assert.equal(await page.locator("#docTotal").innerText(),"¥11,000");
+  await page.mouse.move(1250,77);
+  await page.waitForTimeout(200);
+  await page.screenshot({path:path.join(out,"10-invoice-filled-interaction.png"),fullPage:true});
+  assert.equal(await page.locator("#docItemRows tr").count(),3,"Edited invoice retains three item lines");
   await page.locator("#docType").selectOption("見積書");
   assert.equal(await page.locator("#discount").count(),0);
   await page.locator("#docType").selectOption("請求書");
