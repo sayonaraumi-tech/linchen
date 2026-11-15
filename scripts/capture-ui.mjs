@@ -1,0 +1,31 @@
+import { chromium } from 'playwright';
+import { mkdir, writeFile } from 'node:fs/promises';
+const names=['home','schedule','estimates','documents','saved-documents','sales-payments','expenses-cash','bank-reconciliation','settings'];
+await mkdir('screenshots',{recursive:true});
+const browser=await chromium.launch({headless:true});
+const page=await browser.newPage({viewport:{width:1500,height:1000},deviceScaleFactor:1});
+let errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+await page.goto('file://'+process.cwd()+'/index.html',{waitUntil:'load'});
+const results=[];
+for(let i=0;i<names.length;i++){
+ await page.locator('[data-page="'+i+'"]').click();
+ await page.waitForTimeout(180);
+ const title=await page.locator('#pageTitle').textContent();
+ await page.screenshot({path:'screenshots/'+String(i+1).padStart(2,'0')+'-'+names[i]+'.png',fullPage:true});
+ results.push({page:i+1,title,visible:await page.locator('#content').isVisible(),bytes:(await page.locator('#content').innerText()).length});
+}
+await page.locator('[data-page="1"]').click();
+await page.locator('[data-action="next-month"]').click();
+results.push({test:'calendar-next-month',ok:(await page.locator('#content').innerText()).includes('12月')});
+await page.locator('[data-page="3"]').click();
+await page.locator('[data-action="add-item"]').click();
+results.push({test:'document-add-row',ok:(await page.locator('[data-item$=":name"]').count())===3});
+await page.locator('[data-page="7"]').click();
+await page.locator('[data-bank="1"]').click();
+results.push({test:'bank-select-row',ok:(await page.locator('#content').innerText()).includes('材料仕入先A')});
+await browser.close();
+await writeFile('screenshots/test-report.json',JSON.stringify({results,errors},null,2));
+console.log(JSON.stringify({results,errors},null,2));
+if(errors.length||results.some(x=>x.ok===false||x.visible===false))process.exitCode=1;
