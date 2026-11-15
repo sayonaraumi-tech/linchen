@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>月輪合同会社｜業務管理 UI 試作</title>
+<style>
+:root{--ink:#171717;--gold:#b99755;--goldDark:#775f39;--paper:#f5f5f3;--white:#fff;--line:#dededb;--muted:#777;--soft:#f7f7f5;--ok:#316a51;--bad:#9c5550;--radius:11px}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:#252525;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif}
+button,input,select,textarea{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.app{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}.side{background:var(--ink);color:#eee;padding:22px 15px;position:sticky;top:0;height:100vh}.brand{color:#d8b46a;font-size:19px;font-weight:700;letter-spacing:.03em;padding:0 11px 26px;border-bottom:1px solid #5e5850;margin-bottom:24px}.nav{display:grid;gap:7px}.nav button{border:0;text-align:left;background:transparent;color:#d8d8d8;padding:12px 14px;border-radius:7px}.nav button.active{background:#5b4b33;color:#e8c482;font-weight:700}.nav button:hover:not(.active){background:#303030}.main{min-width:0;padding:20px 22px 40px;max-width:1660px;width:100%;margin:auto}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}.top h1{font-size:27px;margin:0;letter-spacing:.01em}.topRight{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid #d1d1ce;border-radius:7px;padding:9px 15px;background:white;color:#333}.btn:hover{border-color:var(--gold)}.btn.gold{background:var(--gold);border-color:var(--gold);color:#fff}.btn.dark{background:#303030;border-color:#303030;color:white}.btn.active{background:#303030;color:white}.btn.small{padding:5px 10px;font-size:12px}.panel{border:1px solid var(--line);border-radius:var(--radius);padding:16px;background:#fff;margin-bottom:15px;min-width:0}.panel h2{font-size:17px;margin:0 0 12px}.muted{color:var(--muted)}.tiny{font-size:12px}.row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.spread{justify-content:space-between}.stack{display:grid;gap:10px}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.metric{background:var(--soft);padding:12px 14px;border-radius:6px}.metric span{display:block;color:#777}.metric strong{font-size:23px;letter-spacing:-.03em}.two{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(290px,1fr);gap:15px}.three{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.1fr) minmax(280px,.9fr);gap:12px}.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.9fr);gap:14px}.tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}th{font-weight:500;color:#676767;background:#fafaf9}td,th{padding:11px 9px;border-bottom:1px solid #ececea;vertical-align:middle}tr:last-child td{border-bottom:0}tbody tr:hover{background:#faf8f4}.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.positive{color:#2c7053}.negative{color:#a5534b}.status{font-size:12px;color:#755926;font-weight:600}.status.ok{color:#34705c}.status.bad{color:#a55d54}.chip{border-radius:5px;background:#f4ecda;color:#74582d;padding:3px 7px;font-size:12px}.field{min-width:0;background:white;border:1px solid #d9d9d5;border-radius:6px;padding:9px 10px;width:100%}.field:disabled{background:#f7f7f6}.compact{padding:7px 9px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}.formField{display:grid;gap:5px}.formField label{font-size:12px;color:#666}.formField textarea{min-height:68px}.tabs{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:13px}.tabs button{border:1px solid #ddd;border-radius:7px;background:white;padding:9px 15px}.tabs button.active{background:#e7ca8a;border-color:#e7ca8a;color:#332a1a;font-weight:700}.barChart{display:flex;align-items:flex-end;gap:14px;height:195px;border-bottom:1px solid #bbb;padding:8px 6px 0}.barUnit{display:flex;flex:1;height:100%;align-items:end;justify-content:center;gap:3px;position:relative;padding-bottom:25px}.barUnit i{width:32%;background:#c6a560;border-radius:2px 2px 0 0}.barUnit i.gray{background:#b5b5b3}.barUnit label{position:absolute;bottom:0;font-size:11px;color:#777}.barsLegend{display:flex;gap:16px;font-size:12px;color:#666}.sq{display:inline-block;width:10px;height:10px;background:var(--gold);margin-right:5px}.sq.gray{background:#b5b5b3}.calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-left:1px solid #ddd;border-top:1px solid #ddd}.day{min-height:84px;border-right:1px solid #ddd;border-bottom:1px solid #ddd;padding:6px;background:white;text-align:left;min-width:0}.day:hover{background:#faf8f2}.day .date{font-size:12px}.day.sun .date{color:#b44949}.day.sat .date{color:#3b6baa}.day .event{font-size:11px;background:#eee4cd;padding:3px;display:block;margin-top:3px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.day.selected{box-shadow:inset 0 0 0 2px var(--gold)}.calendarHead{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;padding:10px 0;font-size:12px}.preview{background:#f4f4f2;border:1px solid #ddd;border-radius:7px;padding:15px;min-height:500px}.pdfSheet{background:white;box-shadow:0 3px 15px #0001;max-width:440px;min-height:510px;padding:30px;margin:auto;font-size:11px;color:#222}.pdfSheet h2{text-align:center;font-size:21px;letter-spacing:.2em;margin:8px 0 30px}.pdfSheet .total{font-size:20px;font-weight:700;margin:20px 0}.pdfSheet table{font-size:9px}.pdfSheet td,.pdfSheet th{padding:5px 4px}.footerNote{border-top:1px solid #eee;color:#8a8a8a;font-size:12px;padding-top:12px;margin-top:18px}.warn{background:#f6eee0;padding:12px;border-radius:6px;color:#77613d}.bankrow{cursor:pointer}.bankrow.selected{background:#fbf3e3}.actions{display:flex;gap:6px;flex-wrap:wrap}.pill{padding:2px 7px;border-radius:20px;background:#edf5ed;color:#32704f;font-size:11px}.pill.wait{background:#f8eee3;color:#986639}.pill.bad{background:#f7e5e2;color:#a25950}.hide{display:none!important}.notice{background:#fff8e9;color:#73582e;padding:10px 13px;margin-bottom:14px;border-radius:7px;border:1px solid #e9d9b6}.toast{position:fixed;right:20px;bottom:20px;background:#262626;color:white;padding:12px 16px;border-radius:8px;box-shadow:0 8px 25px #0003;z-index:10;max-width:460px}
+@media(max-width:1000px){.app{grid-template-columns:175px 1fr}.main{padding:15px}.summary{grid-template-columns:repeat(2,1fr)}.two,.three,.split{grid-template-columns:1fr}.day{min-height:65px}}@media(max-width:650px){.app{display:block}.side{height:auto;position:static;padding:12px}.brand{margin:0;padding:3px 5px 10px}.nav{display:flex;overflow:auto;gap:4px;padding-top:10px}.nav button{white-space:nowrap;padding:8px}.top h1{font-size:22px}.main{padding:12px}.summary{grid-template-columns:1fr 1fr}.metric strong{font-size:19px}.day{min-height:53px;padding:3px}.day .event{font-size:9px}.pdfSheet{padding:15px}.top{align-items:start}}
+</style>
+</head><body><div class="app">
+<aside class="side"><div class="brand">月輪合同会社</div><nav class="nav" id="navigation"></nav></aside>
+<main class="main"><div class="top"><h1 id="pageTitle"></h1><div class="topRight" id="topActions"></div></div><div class="notice">UI デザイン確認用のデモです。金額・顧客名・取引・帳票はサンプルです。保存、銀行処理、PDF発行は実行しません。</div><div id="content"></div><div class="footerNote">月輪合同会社｜デザイン案 B · 9画面 · 2026年11月 · UIのみ / 正式データ未接続</div></main>
+</div><script>
+"use strict";
+const names=["ホーム","日程","見積履歴","帳票","保存帳票","売上・入金","支出・現金","銀行照合","設定"];
+const amounts=n=>new Intl.NumberFormat("ja-JP").format(n);
+const yen=n=>"¥"+amounts(n);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const state={page:0,tab:"",query:"",month:10,year:2026,day:13,bankFilter:"すべて",bankId:0,docType:"見積書",items:[{name:"クロス張替え",qty:15,unit:"m",price:1400},{name:"補修工事",qty:1,unit:"式",price:10000}],company:"月輪合同会社",chosen:""};
+const invoices=[
+["M-2026-039","2026/11/12","C様","クロス張替工事",1280000,"提出済"],
+["M-2026-038","2026/11/10","Bマンション","共用部改修",2450000,"検討中"],
+["M-2026-037","2026/11/08","A様","内装工事",1760000,"受注"],
+["M-2026-036","2026/11/05","D様","補修工事",98000,"失注"],
+["M-2026-035","2026/11/03","E様","防水工事",132000,"受注"]
+];
+const saved=[
+["Q-2026-038","見積書","2026/11/12","C様","クロス張替工事",1280000],
+["I-2026-028","請求書","2026/11/10","Bマンション","共用部改修",2450000],
+["N-2026-028","納品書","2026/11/08","A様","材料納品",193600],
+["R-2026-019","領収書","2026/11/05","D様","補修工事",98000],
+["O-2026-027","小野田","2026/11/03","dynast合同会社","クロス張替",2695000]
+];
+const banks=[
+{id:0,date:"11/13",desc:"株式会社サンプル",sum:120000,status:"照合待ち",candidate:"請求書 INV-026-104",category:"売上入金"},
+{id:1,date:"11/12",desc:"材料仕入先A",sum:-38200,status:"候補あり",candidate:"支出・材料費",category:"材料費"},
+{id:2,date:"11/10",desc:"振込手数料",sum:-440,status:"未分類",candidate:"",category:"支払手数料"},
+{id:3,date:"11/08",desc:"工事代金B",sum:85000,status:"照合済",candidate:"請求書 INV-026-098",category:"売上入金"}
+];
+function button(label,cmd,variant=""){return '<button type="button" class="btn '+variant+'" data-action="'+esc(cmd)+'">'+esc(label)+'</button>'}
+function tabs(options,current){return '<div class="tabs">'+options.map(x=>'<button class="'+(x===current?'active':'')+'" data-tab="'+esc(x)+'">'+esc(x)+'</button>').join("")+'</div>'}
+function metric(label,value){return '<div class="metric"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></div>'}
+function table(headers,rows){return '<div class="tablewrap"><table><thead><tr>'+headers.map(h=>'<th>'+esc(h)+'</th>').join("")+'</tr></thead><tbody>'+rows.join("")+'</tbody></table></div>'}
+function td(v,cl=""){return '<td class="'+cl+'">'+v+'</td>'}
+function filtered(rows){const q=state.query.trim().toLowerCase();return !q?rows:rows.filter(r=>r.join(" ").toLowerCase().includes(q))}
+function control(name,value,type="text"){return '<div class="formField"><label>'+esc(name)+'</label><input class="field" type="'+type+'" value="'+esc(value)+'" data-field="'+esc(name)+'"></div>'}
+function headActions(){if(state.page===7)return button("CSV取込","csv","gold");if(state.page===1)return button("＋ 予定を登録","new-event","gold");if(state.page===2)return button("＋ 見積書新規作成","go-doc","gold");if(state.page===5)return button("＋ 売上を登録","demo","gold");if(state.page===6)return button("＋ 支出を登録","demo","gold");return '<span class="muted tiny">2026年度（10/1〜9/30）</span>'}
+function home(){
+const vals=[[35,21],[43,27],[49,29],[45,31],[42,28],[39,25],[47,30],[50,35],[55,38],[61,41],[54,33],[68,46]];
+return '<div class="summary">'+metric("売上",yen(32560000))+metric("支出",yen(21840000))+metric("利益",yen(10720000))+metric("利益率","32.9%")+'</div>'+
+'<section class="panel" style="margin-top:15px"><div class="row spread"><h2>月次収支推移（2026年度）</h2><div class="barsLegend"><span><i class="sq"></i>売上</span><span><i class="sq gray"></i>支出</span></div></div><div class="barChart">'+vals.map((v,i)=>'<div class="barUnit"><i style="height:'+v[0]+'%"></i><i class="gray" style="height:'+v[1]+'%"></i><label>'+((i+9)%12+1)+'月</label></div>').join("")+'</div></section>'+
+'<div class="two"><section class="panel"><h2>年度比較</h2>'+table(["年度","売上","支出","利益","利益率"],[["2026年度","32,560,000","21,840,000","10,720,000","32.9%"],["2025年度","28,410,000","19,910,000","8,500,000","29.9%"]].map(r=>'<tr>'+r.map(x=>td(esc(x))).join("")+'</tr>'))+'</section><section class="panel"><h2>月次比較</h2>'+table(["比較期間","売上","前期比"],[["2026年11月","5,320,000","+12.6%"],["2026年10月","4,725,000","—"]].map(r=>'<tr>'+r.map(x=>td(esc(x))).join("")+'</tr>'))+'</section></div>';
+}
+function calendar(){
+let first=new Date(state.year,state.month,1).getDay(),count=new Date(state.year,state.month+1,0).getDate();
+const ev={5:["現地調査"],9:["C邸 工事"],13:["補修工事"],18:["E邸 張替"],20:["C邸 工事"],27:["A邸 内装"]};
+let cells=Array.from({length:42},(_,i)=>{let d=i-first+1,valid=d>0&&d<=count,weekday=i%7;return '<button class="day '+(weekday===0?'sun ':weekday===6?'sat ':'')+(valid&&state.day===d?'selected':'')+'" data-action="'+(valid?'day:'+d:'noop')+'"><span class="date">'+(valid?d:'')+'</span>'+(valid?(ev[d]||[]).map(v=>'<span class="event">'+v+'</span>').join(""):'')+'</button>'}).join("");
+return '<div class="row spread" style="margin-bottom:12px"><div class="row">'+button("‹","prev-month")+ '<strong>'+state.year+'年'+(state.month+1)+'月</strong>'+button("›","next-month")+'</div>'+tabs(["月","週","一覧"],state.tab||"月")+'</div><div class="split"><section class="panel"><div class="calendarHead">'+["日","月","火","水","木","金","土"].map(d=>'<span>'+d+'</span>').join("")+'</div><div class="calendar">'+cells+'</div></section><section class="panel"><h2>予定詳細</h2><p class="muted">'+state.year+'/'+(state.month+1)+'/'+state.day+'</p><h2>施工予定</h2><p>'+(ev[state.day]||["登録済みの予定はありません"])[0]+'</p><div class="stack">'+control("顧客名","C様")+control("工事内容","クロス張替え・補修")+control("開始時刻","09:00","time")+control("終了時刻","17:00","time")+'</div><div class="row" style="margin-top:15px">'+button("編集","demo")+button("削除","demo")+'</div></section></div>';
+}
+function estimates(){return '<section class="panel"><div class="row" style="margin-bottom:13px"><input id="search" class="field" style="max-width:350px" placeholder="キーワード（顧客名・件名・番号）" value="'+esc(state.query)+'"><select class="field" style="width:155px"><option>2026年度</option></select>'+button("検索","search","gold")+'</div>'+table(["見積番号","作成日","顧客名","件名","金額（税込）","状態","操作"],filtered(invoices).map(r=>'<tr>'+td(esc(r[0]))+td(esc(r[1]))+td(esc(r[2]))+td(esc(r[3]))+td(yen(r[4]),"num")+td('<span class="pill wait">'+esc(r[5])+'</span>')+td(button("開く","go-doc","small")+button("変換","go-doc","small"))+'</tr>'))+'</section>'}
+function doc(){
+const subtotal=state.items.reduce((s,x)=>s+Number(x.qty||0)*Number(x.price||0),0),tax=Math.floor(subtotal*.1),total=subtotal+tax;
+const sumRows=state.items.map((x,i)=>'<tr><td><input class="field compact" data-item="'+i+':name" value="'+esc(x.name)+'"></td><td><input class="field compact" type="number" min="0" data-item="'+i+':qty" value="'+x.qty+'"></td><td><input class="field compact" data-item="'+i+':unit" value="'+esc(x.unit)+'"></td><td><input class="field compact" type="number" min="0" data-item="'+i+':price" value="'+x.price+'"></td><td class="num">'+yen(x.qty*x.price)+'</td><td>'+button("削除","remove-item:"+i,"small")+'</td></tr>');
+const pdfRows=state.items.map(x=>'<tr>'+td(esc(x.name))+td(esc(x.qty+" "+x.unit))+td(yen(x.price),"num")+td(yen(x.qty*x.price),"num")+'</tr>').join("");
+return tabs(["見積書","請求書","領収書","小野田"],state.docType)+
+'<div class="split"><section class="panel"><h2>基本情報</h2><div class="grid2">'+control("帳票番号","M-2026-039")+control("作成日","2026-11-15","date")+control("顧客名","C様")+control("件名","クロス張替工事")+'</div><h2 style="margin-top:22px">工事内容・明細</h2>'+table(["内容","数量","単位","単価","金額",""],sumRows)+'<div class="row" style="margin-top:12px">'+button("＋ 行追加","add-item")+button("明細を再計算","refresh")+'</div><div class="row spread" style="margin-top:18px"><span>小計　'+yen(subtotal)+'　／　消費税（10%・仮表示）　'+yen(tax)+'</span><strong>税込　'+yen(total)+'</strong></div><div class="row" style="margin-top:16px">'+button("下書き保存","demo")+button("PDFで確認","refresh","gold")+'</div></section>'+
+'<section class="panel"><h2>PDFプレビュー</h2><div class="preview"><div class="pdfSheet"><h2>御'+esc(state.docType)+'</h2><div class="row spread"><strong>C 様</strong><span>月輪合同会社</span></div><p>件名：クロス張替工事</p><p>発行日：2026/11/15</p><p class="total">'+yen(total)+'（税込）</p>'+table(["工事内容","数量","単価","金額"],[pdfRows])+'<p style="text-align:right">小計 '+yen(subtotal)+'<br>消費税 '+yen(tax)+'<br><strong>合計 '+yen(total)+'</strong></p></div></div><p class="muted tiny">この表示はUI上の概略です。原版PDFテンプレートは本リポジトリに存在せず、実物との一致は未確認です。</p></section></div>';
+}
+function archive(){const t=state.tab||"すべて";let list=filtered(saved).filter(r=>t==="すべて"||r[1]===t);return tabs(["すべて","見積書","請求書","領収書","小野田"],t)+'<section class="panel"><div class="row" style="margin-bottom:12px"><input class="field" style="max-width:350px" id="search" value="'+esc(state.query)+'" placeholder="顧客名・件名・番号"><select class="field" style="width:155px"><option>2026年度</option></select>'+button("検索","search","gold")+'</div>'+table(["帳票番号","帳票種別","作成日","顧客名","件名","金額（税込）","操作"],list.map(r=>'<tr>'+r.slice(0,5).map(v=>td(esc(v))).join("")+td(yen(r[5]),"num")+td(button("表示","go-doc","small")+button("PDF","demo","small"))+'</tr>'))+'</section>'}
+function sales(){
+const t=state.tab||"売上管理";return tabs(["売上管理","入金管理","未収金（回収管理）"],t)+
+'<div class="two"><section class="panel"><h2>'+esc(t==="入金管理"?"入金一覧":"売上一覧")+'</h2>'+table(["計上日","顧客名","件名","金額（税込）"],[["11/10","C様","クロス張替工事",1408000],["11/08","Bマンション","共用部改修",2695000],["11/05","A様","内装工事",1936000],["11/03","D様","補修工事",107800]].map(r=>'<tr>'+td(r[0])+td(r[1])+td(r[2])+td(yen(r[3]),"num")+'</tr>'))+'<p class="num"><strong>合計　'+yen(6146800)+'</strong></p></section>'+
+'<section class="panel"><h2>未収金（回収管理）</h2>'+table(["顧客名","未収金額","入金予定日"],[["C様",980000,"11/30"],["Bマンション",1655000,"12/15"],["A様",452000,"12/10"]].map(r=>'<tr>'+td(r[0])+td(yen(r[1]),"num")+td(r[2])+'</tr>'))+'<p class="num"><strong>未収金合計　'+yen(3087000)+'</strong></p></section></div>';
+}
+function expenses(){
+const t=state.tab||"支出管理";return tabs(["支出管理","現金収支","CSV取込"],t)+'<section class="panel"><div class="row" style="margin-bottom:12px"><select class="field" style="max-width:145px"><option>2026年11月</option></select><select class="field" style="max-width:160px"><option>すべての分類</option></select><input id="search" class="field" style="max-width:240px" value="'+esc(state.query)+'" placeholder="キーワード">'+button("検索","search","gold")+'</div>'+table(["日付","内容","分類","金額（税込）","支払方法","操作"],filtered([["11/12","壁紙（サンゲツ）","材料費",286000,"銀行"],["11/10","定期リース","外注費",44000,"銀行"],["11/08","廃材処分費","その他経費",33000,"現金"],["11/05","ガソリン代","車両費",8420,"現金"],["11/03","消耗品（養生材）","材料費",15400,"現金"]]).map(r=>'<tr>'+td(esc(r[0]))+td(esc(r[1]))+td(esc(r[2]))+td(yen(r[3]),"num")+td(esc(r[4]))+td(button("表示","demo","small"))+'</tr>'))+'<p class="num"><strong>表示例合計　'+yen(386820)+'</strong></p></section>';
+}
+function bank(){
+const f=state.bankFilter,rows=banks.filter(x=>f==="すべて"||(f==="未照合"?x.status!=="照合済":x.status==="照合済"));let x=banks[state.bankId];
+return '<section class="panel"><p class="muted">口座：法人銀行口座　｜　期間：2026年11月</p><div class="summary" style="grid-template-columns:repeat(3,minmax(0,1fr))">'+metric("取込明細","4件")+metric("未照合","3件")+metric("照合済","1件")+'</div></section><div class="row" style="margin-bottom:14px">'+["すべて","未照合","照合済"].map(t=>button(t,"bank-filter:"+t,t===f?"dark":"")) .join("")+'</div>'+
+'<section class="panel"><h2>銀行明細一覧</h2>'+table(["日付","摘要","金額","状態"],rows.map(r=>'<tr class="bankrow '+(r.id===state.bankId?'selected':'')+'" data-bank="'+r.id+'">'+td(esc(r.date))+td(esc(r.desc))+td((r.sum>0?"+":"")+amounts(r.sum),"num "+(r.sum>0?"positive":""))+td('<span class="status '+(r.status==="照合済"?"ok":"")+'">'+esc(r.status)+'</span>')+'</tr>'))+'</section><div class="grid2"><section class="panel"><h2>選択明細</h2><p class="muted">'+esc(x.date)+'　'+(x.sum>0?"入金":"出金")+'</p><h2>'+esc(x.desc)+'</h2><h2>'+yen(Math.abs(x.sum))+'</h2></section><section class="panel"><h2>照合候補・処理</h2><p class="muted">'+(x.candidate?"全額一致候補":"候補なし")+'</p><p>'+esc(x.candidate||"一致する取引が見つかりません")+'</p><div class="warn">既存記録との関連付け / 科目確認 / 新規補録</div><div class="actions" style="margin-top:14px">'+button("既存記録に関連付け","demo","small")+button("科目を確認","demo","small")+button("新規補録","demo","small")+'</div></section></div><p class="muted tiny">正式版では銀行CSVと既存取引の重複防止・金額照合・確認済状態をバックエンドで保証する必要があります。</p>';
+}
+function settings(){
+let t=state.tab||"会社情報";return tabs(["会社情報","帳票設定","番号ルール","分類マスター","ユーザー"],t)+
+'<section class="panel"><div class="two"><div><h2>'+esc(t)+'</h2><div class="stack">'+control("会社名","月輪合同会社")+control("郵便番号","")+control("住所","")+control("電話番号","")+control("メール","")+control("登録番号（インボイス）","")+'</div></div><div><h2>帳票への表示（プレビュー）</h2><div class="preview" style="min-height:250px"><div class="pdfSheet" style="min-height:215px"><h2 style="font-size:20px;margin:20px">月輪合同会社</h2><p class="muted">会社情報は未接続です。架空の住所や登録番号は表示しません。</p></div></div></div></div><div class="row" style="margin-top:16px">'+button("保存（デモ）","demo","gold")+'</div></section>';
+}
+const renderers=[home,calendar,estimates,doc,archive,sales,expenses,bank,settings];
+function render(){
+document.getElementById("navigation").innerHTML=names.map((n,i)=>'<button data-page="'+i+'" class="'+(state.page===i?'active':'')+'">'+esc(n)+'</button>').join("");
+document.getElementById("pageTitle").textContent=names[state.page];document.getElementById("topActions").innerHTML=headActions();document.getElementById("content").innerHTML=renderers[state.page]();
+}
+function toast(msg){let old=document.getElementById("toast");if(old)old.remove();let t=document.createElement("div");t.id="toast";t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),4000)}
+function action(a){
+if(a==="demo"||a==="csv"||a==="new-event")return toast("デモ画面：正式なデータ保存・CSV取込・PDF生成は行いません。");
+if(a==="go-doc"){state.page=3;state.tab="";return render()}
+if(a==="prev-month"){state.month--;if(state.month<0){state.month=11;state.year--}return render()}
+if(a==="next-month"){state.month++;if(state.month>11){state.month=0;state.year++}return render()}
+if(a.startsWith("day:")){state.day=Number(a.split(":")[1]);return render()}
+if(a.startsWith("bank-filter:")){state.bankFilter=a.slice(12);return render()}
+if(a==="add-item"){state.items.push({name:"",qty:1,unit:"式",price:0});return render()}
+if(a.startsWith("remove-item:")){state.items.splice(Number(a.slice(12)),1);return render()}
+if(a==="search"){state.query=document.getElementById("search")?.value||"";return render()}
+if(a==="refresh")return render();
+}
+document.addEventListener("click",e=>{
+const p=e.target.closest("[data-page]");if(p){state.page=Number(p.dataset.page);state.tab="";state.query="";render();return}
+const t=e.target.closest("[data-tab]");if(t){let v=t.dataset.tab;if(state.page===3)state.docType=v;else state.tab=v;render();return}
+const b=e.target.closest("[data-bank]");if(b){state.bankId=Number(b.dataset.bank);render();return}
+const a=e.target.closest("[data-action]");if(a)action(a.dataset.action);
+});
+document.addEventListener("change",e=>{const a=e.target.dataset.item;if(a){const [i,k]=a.split(":");state.items[Number(i)][k]=["qty","price"].includes(k)?Number(e.target.value):e.target.value;render()}});
+render();
+</script></body></html>
