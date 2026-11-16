@@ -21,5 +21,8 @@
     "firebase-tools": "15.11.0",
     "playwright": "1.62.1",
     "html2pdf.js": "0.10.1"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.13.6"
   }
 }
