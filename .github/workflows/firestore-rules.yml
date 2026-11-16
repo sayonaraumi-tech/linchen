@@ -6,8 +6,20 @@ on:
       - 'firestore.rules'
       - 'firebase.json'
       - 'src/storage/**'
+      - 'src/services/**'
+      - 'services/api/**'
       - 'tests/firestore-rules.test.cjs'
       - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/firestore-rules.yml'
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'firebase.json'
+      - 'src/**'
+      - 'services/api/**'
+      - 'tests/firestore-rules.test.cjs'
+      - 'package*.json'
       - '.github/workflows/firestore-rules.yml'
 permissions:
   contents: read
@@ -25,6 +37,6 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
       - name: Install isolated test dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify tenant and audit rules in disposable emulator
         run: npm run test:rules

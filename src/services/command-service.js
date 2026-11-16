@@ -8,8 +8,11 @@ const META_ID='_domain_metadata';
 const COLLECTIONS=Domain.COLLECTIONS.filter(k=>k!=='auditLogs');
 const clone=x=>JSON.parse(JSON.stringify(x));
 const json=x=>JSON.stringify(x);
+class RevisionConflict extends Error {}
 async function requestHash(command){
- const bytes=new TextEncoder().encode(JSON.stringify(command));
+ const canonical=(value)=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?
+  Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+ const bytes=new TextEncoder().encode(JSON.stringify(canonical(command)));
  if(!globalThis.crypto?.subtle)throw Error('Secure SHA-256 not available for operation verification');
  const digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);
  return Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
@@ -24,7 +27,7 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
   const snapshots={};
   let scanned=0;
   for(const collection of COLLECTIONS){
-   const records=await repository.list(collection);
+   const records=await repository.list(collection,maximumRecords-scanned+1);
    scanned+=records.length;
    if(scanned>maximumRecords)throw Error('大量履歴データを全件読込する操作は未対応です。ページ分割された信頼済サーバ処理が必要です');
    for(const r of records){
@@ -35,7 +38,7 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
    }
   }
   const last=await repository.read('settings',META_ID);
-  if(json(first)!==json(last))throw Error('同期中に更新がありました。操作を再試行してください');
+  if(json(first)!==json(last))throw new RevisionConflict('同期中に更新がありました。操作を再試行してください');
   state.seq=Number(first?.payload?.seq||0);
   if(!Number.isSafeInteger(state.seq)||state.seq<0)throw Error('Domain sequence corrupted');
   return {state,revision:first?.revision||0,snapshots};
@@ -52,6 +55,19 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
    return {reused:true,targets:previous.targets,operationId:command.operationId};
   }
   const {state,revision,snapshots}=await load();
+  if(command.expectedRevision!==undefined&&command.expectedRevision!==revision){
+   throw new RevisionConflict('版数競合: 最新のデータを再読込してください');
+  }
+  const editableCollection={saveCustomer:'customers',saveSchedule:'schedule'}[command.type];
+  if(command.expectedRevision!==undefined&&command.id&&editableCollection){
+   const original=snapshots[editableCollection+'/'+command.id]?.payload;
+   if(!original)throw Error('編集対象の記録がありません');
+   if(editableCollection==='schedule'&&(original.estimateId||original.registeredSaleId||original.googleEventId||
+     Object.values(state.collections.documents).some(doc=>doc.scheduleId===original.id||
+       doc.items?.some(item=>item.sourceEventId===original.id)))){
+    throw Error('連携済日程は専用の訂正手続が必要です');
+   }
+  }
   const before=clone(state);
   const result=Domain.perform(state,command);
   const changed=[];
@@ -87,4 +103,4 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
  }
  return {execute,load};
 }
-module.exports={createCommandService,META_ID};
+module.exports={createCommandService,META_ID,RevisionConflict};

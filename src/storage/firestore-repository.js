@@ -6,7 +6,7 @@
 'use strict';
 const COLLECTIONS=Object.freeze(['settings','customers','projects','schedule','documents','sales','payments','expenses','cashLedger','bankTransactions','suppliers','supplierTransactions','calendarLinks','auditLogs']);
 const STAFF_READ=new Set(['customers','projects','schedule','documents','sales','payments','calendarLinks']);
-const validId=x=>typeof x==='string'&&x.length>0&&x.length<=160&&!/[/\x00-\x1f]/.test(x)&&!['.','..'].includes(x);
+const validId=x=>typeof x==='string'&&x.length>0&&x.length<=160&&!/[/\x00-\x1f]/.test(x)&&!['.','..'].includes(x)&&!Object.hasOwn(Object.prototype,x);
 const requireId=(x,label)=>{if(!validId(x))throw Error(label+'のIDが不正です');return x;};
 function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
  if(!sdk||!db||typeof getIdentity!=='function')throw Error('Firestore SDK、DB、認証が必要です');
@@ -30,9 +30,11 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
   const snap=await sdk.getDoc(sdk.doc(db,path(name,id)));
   return snap.exists()?{id:snap.id,...snap.data()}:null;
  }
- async function list(name){
+ async function list(name,limit){
   const user=await identity();canRead(user,name);
-  const snaps=await sdk.getDocs(sdk.collection(db,base+'/'+collectionName(name)));
+  const reference=sdk.collection(db,base+'/'+collectionName(name));
+  const query=limit!==undefined&&sdk.limitQuery?sdk.limitQuery(reference,limit):reference;
+  const snaps=await sdk.getDocs(query);
   return snaps.docs.map(d=>({id:d.id,...d.data()}));
  }
  /* One command is an immutable operation with up to ten checked writes.
@@ -77,6 +79,10 @@ function createRepository({sdk,db,getIdentity,companyId,writeEnabled=false}={}){
     const revision=previous?.revision||0;
     if(revision!==c.expectedRevision)throw Error('版数競合: '+c.collection+'/'+c.id);
     if(previous&&previous.companyId!==companyId)throw Error('会社IDが不一致です');
+    if(previous&&c.collection==='documents'&&(
+     c.payload.invoiceNo!==previous.payload.invoiceNo||c.payload.docType!==previous.payload.docType||
+     JSON.stringify(c.payload.snapshot)!==JSON.stringify(previous.payload.snapshot)
+    ))throw Error('発行済帳票の原本は上書きできません');
    }
    const now=sdk.serverTimestamp(),targets=changes.map(c=>c.collection+'/'+c.id);
    for(let i=0;i<changes.length;i++){

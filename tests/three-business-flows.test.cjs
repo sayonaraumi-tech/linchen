@@ -29,6 +29,8 @@ test('estimate -> invoice -> confirmed bank receipt preserves original immutable
  s=run(s,'receipt1',{type:'issueReceiptForPayment',paymentId:pay.id,issuedAt:'2026-11-17T03:00:00Z'});
  s=run(s,'receipt2',{type:'issueReceiptForPayment',paymentId:pay.id,issuedAt:'2026-11-18T03:00:00Z'});
  assert.equal(B.list(s,'documents').length,3);
+ assert.throws(()=>run(s,'unmatch-issued',{type:'unmatchBank',bankTxnId:bank.id}),/発行済み領収書/);
+ assert.equal(B.list(s,'payments')[0].confirmation,'bank-confirmed');
  assert.equal(B.list(s,'sales').length,1);
  assert.equal(B.list(s,'payments').length,1);
  assert.equal(B.list(s,'cashLedger').length,0);
@@ -112,4 +114,28 @@ test('converted estimate cannot be physically deleted while invoice references i
  s=run(s,'convert',{type:'convertEstimateToInvoice',estimateId:quote.id});
  assert.throws(()=>run(s,'del',{type:'deleteTestRecord',collection:'documents',id:quote.id,confirmTestDeletion:true}),/関連記録/);
  assert.equal(B.list(s,'documents').length,2);
+});
+
+test('an invoice without confirmed bank payment cannot issue a bank receipt',()=>{
+ let s=B.emptyState();
+ s=run(s,'invoice-for-bank',{type:'issueDocument',docType:'invoice',amount:1100,
+  snapshot:{customerName:'A',invoiceDate:'2026-11-13'}});
+ const saleId=B.list(s,'sales')[0].id;
+ assert.throws(()=>run(s,'pending-receipt',{type:'issueDocument',docType:'receipt',saleId,
+  snapshot:{customerName:'A',invoiceDate:'2026-11-13',receiptTotal:1100,paymentMethod:'銀行振込'}}),/確認済入金/);
+ assert.equal(B.list(s,'payments').length,0);
+ assert.equal(B.list(s,'documents').length,1);
+});
+
+test('representative advances remain unsettled and cannot match same-amount company bank outflow',()=>{
+ let s=B.emptyState();
+ s=run(s,'advance',{type:'saveExpense',expenseDate:'2026-11-13',vendor:'材料',category:'材料費',
+  amount:900,paymentMethod:'代表者立替（交通系IC）'});
+ s=run(s,'bank-line',{type:'importBankTransaction',account:'GMO',externalId:'b1',
+  date:'2026-11-13',direction:'outgoing',amount:900});
+ const expense=B.list(s,'expenses')[0],bank=B.list(s,'bankTransactions')[0];
+ assert.throws(()=>run(s,'bad-match',{type:'matchBankExpense',bankTxnId:bank.id,expenseId:expense.id}),/出金照合条件/);
+ assert.equal(B.list(s,'cashLedger').length,0);
+ assert.equal(require('../src/core/views').expensesRegister(s)[0].paymentStatus,'立替未精算');
+ assert.equal(B.list(s,'bankTransactions')[0].status,'unmatched');
 });

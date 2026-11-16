@@ -19,6 +19,8 @@ const text=(v,k)=>{let s=String(v??'').trim();if(!s)throw Error(k+'は必須で�
 const date=(v,k='日付')=>{const s=text(v,k);if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||Number.isNaN(Date.parse(s))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)throw Error(k+'の形式が不正です');return s;};
 const active=r=>!!r&&!r.deletedAt&&r.status!=='void'&&r.status!=='cancelled';
 const BANK_PENDING='pending-bank',BANK_CONFIRMED='bank-confirmed',CASH='cash-received';
+const representativeAdvance=method=>typeof method==='string'&&method.startsWith('代表者立替');
+const bankExpenseEligible=method=>method!=='現金'&&!representativeAdvance(method);
 const EXPENSE_CATEGORIES=new Set(['材料費','材料仕入','旅費交通費','地代家賃','租税公課','給与','家賃','交通費','車両費','通信費','消耗品費','外注費','支払手数料','その他']);
 const normalizeParty=v=>String(v??'').normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase();
 const expenseRuleId=vendor=>'expense_rule_'+normalizeParty(vendor);
@@ -110,10 +112,13 @@ function issue(s,x){
   if(x.paymentId){
    pay=requireRow(s,'payments',x.paymentId);
    if(pay.saleId!==sale.id||pay.amount!==amount||![CASH,BANK_CONFIRMED].includes(pay.confirmation))throw Error('指定した確認済入金と領収書が一致しません');
+   if(pay.paymentDate!==issueDate)throw Error('入金日が領収日と一致しません');
+   if(rows(s,'documents').some(d=>d.docType==='receipt'&&d.paymentId===pay.id&&d.status==='active'))throw Error('別の領収書がすでに発行されています');
    if(pay.sourceDocumentId&&pay.sourceDocumentId!==sourceKey)throw Error('別の領収書がすでに発行されています');
    if(snapshot.paymentMethod&&snapshot.paymentMethod!==pay.method)throw Error('入金方法が既存の支払記録と一致しません');
    pay.sourceDocumentId=sourceKey||pay.sourceDocumentId;
   }else{
+   if(snapshot.paymentMethod!=='現金')throw Error('現金以外の領収書には確認済入金の指定が必要です');
    pay=payment(s,{saleId:sale.id,amount,method:text(snapshot.paymentMethod,'入金方法'),paymentDate:issueDate,sourceDocumentId:sourceKey||'receipt:'+String(s.seq+1)});
   }
  }
@@ -156,7 +161,13 @@ function operate(s,cmd){
   const id=c.id||idFor(s,'event'),old=row(s,'schedule',id);
   if(old&&!active(old))throw Error('取消済日程は通常保存で復活できません');
   if(old?.registeredSaleId&&c.projectId&&c.projectId!==old.projectId)throw Error('売上登録済みの工事は案件変更できません');
-  a=write(s,'schedule',{...old,id,date:date(c.date,'施工日'),title:text(c.title,'予定名'),customer:c.customer===undefined?old?.customer||'':String(c.customer),description:c.description===undefined?old?.description||'':String(c.description),projectId:String(c.projectId||old?.projectId||''),calendarId:String(c.calendarId||old?.calendarId||''),googleEventId:String(c.googleEventId||old?.googleEventId||''),googleUpdatedAt:c.googleUpdatedAt||old?.googleUpdatedAt||'',googleStatus:c.googleStatus||old?.googleStatus||'confirmed',start:c.start||old?.start||'',end:c.end||old?.end||'',location:c.location===undefined?old?.location||'':String(c.location),registeredSaleId:old?.registeredSaleId||'',status:'active'});break;}
+  const kind=c.kind??old?.kind;
+  if(c.kind!==undefined&&!['見積','その他','小野田'].includes(c.kind))throw Error('予定区分が不正です');
+  const onodaQuantity=Object.hasOwn(c,'onodaQuantity')?c.onodaQuantity:old?.onodaQuantity??null;
+  if(c.onodaQuantity!=null&&(kind!=='小野田'||typeof onodaQuantity!=='number'||
+    !Number.isFinite(onodaQuantity)||onodaQuantity<=0))throw Error('小野田の施工数量は正数で入力してください');
+  const onodaFields=kind===undefined?{}:{kind,onodaQuantity:kind==='小野田'?onodaQuantity:null};
+  a=write(s,'schedule',{...old,...onodaFields,id,date:date(c.date,'施工日'),title:text(c.title,'予定名'),customer:c.customer===undefined?old?.customer||'':String(c.customer),description:c.description===undefined?old?.description||'':String(c.description),projectId:String(c.projectId||old?.projectId||''),calendarId:String(c.calendarId||old?.calendarId||''),googleEventId:String(c.googleEventId||old?.googleEventId||''),googleUpdatedAt:c.googleUpdatedAt||old?.googleUpdatedAt||'',googleStatus:c.googleStatus||old?.googleStatus||'confirmed',start:c.start||old?.start||'',end:c.end||old?.end||'',location:c.location===undefined?old?.location||'':String(c.location),registeredSaleId:old?.registeredSaleId||'',status:'active'});break;}
  case 'registerScheduleSale':{
   const ev=requireRow(s,'schedule',c.scheduleId);
   if(ev.registeredSaleId){a=requireRow(s,'sales',ev.registeredSaleId);break;}
@@ -217,11 +228,12 @@ function operate(s,cmd){
   const pay=requireRow(s,'payments',c.paymentId);
   if(![CASH,BANK_CONFIRMED].includes(pay.confirmation))throw Error('銀行未照合の入金には領収書を発行できません');
   const sale=requireRow(s,'sales',pay.saleId);
-  const existing=rows(s,'documents').find(d=>d.docType==='receipt'&&d.paymentId===pay.id);
+  const receipts=rows(s,'documents').filter(d=>d.docType==='receipt'&&d.paymentId===pay.id);
+  const existing=receipts.find(d=>d.status==='active'&&active(d));
   if(existing){
-   if(!active(existing))throw Error('無効な領収書は再発行できません');
    a={document:existing,saleId:sale.id,paymentId:pay.id,reused:true};break;
   }
+  if(receipts.length)throw Error('無効な領収書は再発行できません');
   const invoice=rows(s,'documents').find(d=>active(d)&&d.saleId===sale.id&&(d.docType==='invoice'||d.docType==='onoda'));
   const snap={customerName:invoice?.customer||sale.customer,invoiceDate:pay.paymentDate,
    docType:'receipt',receiptTotal:pay.amount,paymentMethod:pay.method,
@@ -374,11 +386,11 @@ function operate(s,cmd){
   b.status='matched';b.matchType='payment';b.matchId=p.id;p.bankTxnId=b.id;p.confirmation=BANK_CONFIRMED;p.paymentDate=b.date;a={bank:b,payment:p};break;}
  case 'matchBankExpense':{
   const b=requireRow(s,'bankTransactions',c.bankTxnId),e=requireRow(s,'expenses',c.expenseId);
-  if(b.direction!=='outgoing'||b.status!=='unmatched'||e.paymentMethod==='現金'||e.bankTxnId||b.amount!==e.amount)throw Error('出金照合条件が一致しません');
+  if(b.direction!=='outgoing'||b.status!=='unmatched'||!bankExpenseEligible(e.paymentMethod)||e.bankTxnId||b.amount!==e.amount)throw Error('出金照合条件が一致しません');
   b.status='matched';b.matchType='expense';b.matchId=e.id;e.bankTxnId=b.id;a={bank:b,expense:e};break;}
  case 'matchBankSupplier':{
   const b=requireRow(s,'bankTransactions',c.bankTxnId),tx=requireRow(s,'supplierTransactions',c.transactionId);
-  if(b.direction!=='outgoing'||b.status!=='unmatched'||tx.paymentMethod==='現金'||tx.type==='monthlyInvoice'||tx.bankTxnId||b.amount!==tx.amount)throw Error('仕入先送金の照合条件が一致しません');
+  if(b.direction!=='outgoing'||b.status!=='unmatched'||!bankExpenseEligible(tx.paymentMethod)||tx.type==='monthlyInvoice'||tx.bankTxnId||b.amount!==tx.amount)throw Error('仕入先送金の照合条件が一致しません');
   b.status='matched';b.matchType='supplier';b.matchId=tx.id;tx.bankTxnId=b.id;a={bank:b,transaction:tx};break;}
  case 'reviewBankIncome':{
   if(c.reviewed!==true)throw Error('銀行雑収入の分類は明示確認が必要です');
@@ -402,7 +414,13 @@ function operate(s,cmd){
  case 'unmatchBank':{
   const b=requireRow(s,'bankTransactions',c.bankTxnId);
   if(b.status!=='matched')throw Error('未照合の明細です');
-  if(b.matchType==='payment'){const p=requireRow(s,'payments',b.matchId);p.bankTxnId='';p.confirmation=BANK_PENDING;}
+  if(b.matchType==='payment'){
+   const p=requireRow(s,'payments',b.matchId);
+   if(rows(s,'documents').some(d=>d.docType==='receipt'&&d.paymentId===p.id&&d.status==='active'&&active(d))){
+    throw Error('発行済み領収書がある入金は専用の訂正手続が必要です');
+   }
+   p.bankTxnId='';p.confirmation=BANK_PENDING;
+  }
   if(b.matchType==='expense'){const e=requireRow(s,'expenses',b.matchId);e.bankTxnId='';}
   if(b.matchType==='supplier'){const tx=requireRow(s,'supplierTransactions',b.matchId);tx.bankTxnId='';}
   if(b.matchType==='bankIncome'){delete b.category;delete b.taxTreatment;delete b.reviewNote;}
@@ -495,5 +513,5 @@ function getOverview(s){
  return {otherIncome,sales:sum(sales),confirmedPayments:sum(payments),outstanding:sales.reduce((n,x)=>n+x.amount-totalPayments(s,x.id),0),expenses:sum(expenses),cashIn:sum(cash.filter(x=>x.type==='income')),cashOut:sum(cash.filter(x=>x.type==='expense')),salesCount:sales.length,expenseCount:expenses.length};
 }
 function list(s,collection){assertState(s);if(!COLLECTIONS.includes(collection))throw Error('Unsupported collection');return clone(rows(s,collection));}
-return {COLLECTIONS,TYPES,emptyState,perform,list,getOverview,balance,supplierBalance,suggestExpenseCategory};
+return {COLLECTIONS,TYPES,emptyState,perform,list,getOverview,balance,supplierBalance,suggestExpenseCategory,representativeAdvance,bankExpenseEligible};
 });

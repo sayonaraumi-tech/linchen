@@ -9,7 +9,7 @@ const Sandbox=globalThis.TsukinowaSandboxStorage;
 if(!B||!Calendar||!Sandbox)throw Error('Required domain runtime missing');
 const store=Sandbox.createSandboxStore({storage:localStorage,key:'linchen_independent_test_v1'});
 const root=document.getElementById('page'),status=document.getElementById('status');
-let current='home',editing={schedule:'',customer:'',expense:''};
+let current='home',editing={schedule:'',customer:'',expense:''},onodaDraft=null,documentFormDraft=null;
 const esc=x=>String(x??'').replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
 const amount=x=>Number(x||0).toLocaleString('ja-JP')+' 円';
 const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -32,18 +32,31 @@ function schedule(){
  const s=snapshot(),month=document.getElementById('calendar-month')?.value||today().slice(0,7);
  const monthView=Calendar.calendarMonth(s,month);
  const edit=list('schedule').find(x=>x.id===editing.schedule&&x.status==='active');
- const inputs=field('date','施工日','date',edit?.date||today())+field('title','予定名','text',edit?.title||'')+field('customer','取引先','text',edit?.customer||'',false)+field('description','内容','text',edit?.description||'',false);
+ const inputs=field('date','施工日','date',edit?.date||today())+field('title','予定名','text',edit?.title||'')+field('customer','取引先','text',edit?.customer||'',false)+field('description','内容','text',edit?.description||'',false)+
+  select('kind','区分',[['見積','見積'],['その他','その他'],['小野田','小野田']],edit?.kind)+
+  '<label>小野田施工数量（m）<input name="onodaQuantity" type="number" min="0" step="0.01" value="'+esc(edit?.onodaQuantity??'')+'"></label>';
  const cells=monthView.cells.map(c=>'<div class="day'+(c.inMonth?'':' outside')+'" data-date="'+esc(c.date)+'"><b>'+esc(c.day)+'</b>'+c.events.map(e=>'<div class="event">'+esc(e.title)+'<small> '+esc(e.status)+'</small></div>').join('')+'</div>').join('');
  const rows=list('schedule').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.status!=='active'?button('schedule-restore',e.id,'復元'):(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+' '+button('schedule-edit',e.id,'編集')+' '+(!e.registeredSaleId?button('schedule-void',e.id,'取消'):''))+'</td></tr>');
  return page('日程','内部日程が主データです。Google Calendar は不要で、無接続でも追加・表示できます。',
- '<label>対象月<input type="month" id="calendar-month" value="'+esc(month)+'"></label><div class="day-grid">'+cells+'</div>'+
+ '<label>対象月<input type="month" id="calendar-month" value="'+esc(month)+'"></label>'+button('onoda-import',month,'小野田明細読込 → 請求書')+'<div class="day-grid">'+cells+'</div>'+
  form('schedule',inputs,edit?'日程の変更を保存':'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID','操作'],rows));
 }
 function documents(){
- const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],['onoda','小野田']])+
- field('customerName','宛名')+field('invoiceDate','発行日','date',today())+
- field('amount','入力金額（見積・請求=税抜、領収=受領税込）','number','10000')+field('description','工事内容','text','壁紙補修')+
- select('paymentMethod','受領方法',[['現金','現金'],['銀行振込','銀行振込']]);
+ if(onodaDraft){
+  const draft=onodaDraft;
+  return page('帳票','小野田専用請求書の読込内容を確認します。',
+   '<h3>'+esc(draft.billingMonth)+' 小野田請求書・編集中</h3>'+
+   '<p>'+esc(draft.customerName)+'　'+esc(draft.invoiceDate)+'</p>'+
+   grid(['施工日','内容','数量（m）','単価','税区分','備考'],draft.items.map(row=>td([
+    row.workDate,row.content,row.qty,amount(row.price),row.taxable?'課税':'非課税',row.memo,
+   ])))+button('onoda-close','','編集中の明細を閉じる'));
+ }
+ const draft=documentFormDraft||{};
+ const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],['onoda','小野田']],draft.docType)+
+ field('customerName','宛名','text',draft.customerName??'')+field('invoiceDate','発行日','date',draft.invoiceDate??today())+
+ field('amount','入力金額（見積・請求=税抜、領収=受領税込）','number',draft.amount??'10000')+
+ field('description','工事内容','text',draft.description??'壁紙補修')+
+ select('paymentMethod','受領方法',[['現金','現金'],['銀行振込','銀行振込']],draft.paymentMethod);
  return page('帳票','この画面は帳票レコードの保存動作を検証します。PDFの原版レイアウト・実際の印刷機能は別のPDFテストで検証します。',
  form('document',inputs,'帳票を正式保存')+
  '<p class="note">見積書は売上を作成しません。独立した領収書は現金のみ登録できます。銀行振込の領収書は既存売上・入金との明示的な関連が必要です。</p>');
@@ -124,7 +137,12 @@ async function submit(form){
  const data=new FormData(form),action=form.dataset.action;
  let command;
  switch(action){
- case 'schedule':command={type:'saveSchedule',id:editing.schedule||undefined,date:val(data,'date'),title:val(data,'title'),customer:val(data,'customer'),description:val(data,'description')};break;
+ case 'schedule':{
+  const kind=val(data,'kind'),quantity=val(data,'onodaQuantity');
+  command={type:'saveSchedule',id:editing.schedule||undefined,date:val(data,'date'),title:val(data,'title'),
+   customer:val(data,'customer'),description:val(data,'description'),kind,onodaQuantity:quantity?Number(quantity):null};
+  break;
+ }
  case 'document':{
   const type=val(data,'docType'),amountValue=Number(val(data,'amount'));
   const customer=val(data,'customerName'),date=val(data,'invoiceDate'),description=val(data,'description');
@@ -142,6 +160,7 @@ async function submit(form){
  default:throw Error('Unsupported form action');
  }
  await store.perform({...command,operationId:form.dataset.operationId});
+ if(action==='document')documentFormDraft=null;
  notice('テスト領域に保存しました：'+action);
  if(action in editing)editing[action]='';
  render(current);
@@ -188,6 +207,46 @@ async function clickAction(btn){
   setTimeout(()=>URL.revokeObjectURL(url),0);
   if(JSON.stringify(snapshot())!==before)throw Error('PDF再ダウンロード中の会計データ変更');
   notice('原版PDFをダウンロードしました（データ変更なし）');return;
+ }
+ if(action==='onoda-import'){
+  const rows=Calendar.onodaCandidates(snapshot(),id);
+  if(!rows.length)throw Error('対象月の小野田明細がありません');
+  const dialog=document.createElement('dialog');
+  dialog.innerHTML='<h3>小野田明細読込 '+esc(id)+'</h3><form>'+
+   grid(['選択','施工日','内容','数量（m）','備考'],rows.map(row=>'<tr><td><input type="checkbox" name="selected" aria-label="'+
+    esc(row.title)+'" value="'+esc(row.id)+'"'+(row.quantity>0?' checked':'')+'></td><td>'+esc(row.date)+'</td><td>'+
+    esc(row.title)+'</td><td>'+esc(row.quantity??'未入力')+'</td><td>'+esc(row.memo)+'</td></tr>'))+
+   field('customerName','請求先')+field('invoiceDate','請求日','date')+
+   '<label>確認済単価（円）<input name="unitPrice" type="number" min="1" step="1" required></label>'+
+   select('taxable','税区分',[['','選択してください'],['taxable','課税'],['exempt','非課税']])+
+   '<button type="submit">明細を読み込む</button><button type="button" data-close>閉じる</button><p role="alert"></p></form>';
+  dialog.querySelector('[data-close]').addEventListener('click',()=>dialog.close());
+  dialog.querySelector('form').addEventListener('submit',event=>{
+   event.preventDefault();
+   const data=new FormData(event.currentTarget),tax=val(data,'taxable');
+   try{
+    const draft=Calendar.draftOnodaInvoice(snapshot(),{month:id,selectedIds:data.getAll('selected'),
+     invoiceDate:val(data,'invoiceDate'),billing:{customerName:val(data,'customerName'),
+      unitPrice:Number(val(data,'unitPrice')),taxable:tax?tax==='taxable':undefined}});
+    if((onodaDraft||documentFormDraft)&&!confirm('現在編集中の帳票を置き換えますか？'))return;
+    onodaDraft=draft;
+    documentFormDraft=null;
+    dialog.close();
+    render('documents');
+    notice('選択した明細を読み込みました');
+   }catch(error){dialog.querySelector('[role=alert]').textContent=error.message;}
+  });
+  dialog.addEventListener('close',()=>dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  return;
+ }
+ if(action==='onoda-close'){
+  if(confirm('編集中の明細を閉じますか？')){
+   onodaDraft=null;
+   render('documents');
+  }
+  return;
  }
  if(['schedule-restore','expense-restore','customer-restore'].includes(action)){
   const collection={schedule:'schedule',expense:'expenses',customer:'customers'}[action.split('-')[0]];
@@ -247,7 +306,7 @@ async function clickAction(btn){
   const bank=list('bankTransactions').find(x=>x.id===id);
   if(!bank||bank.status!=='unmatched')throw Error('未照合の銀行明細が必要です');
   const pool=bank.direction==='income'?list('payments').filter(x=>x.status==='active'&&x.confirmation==='pending-bank'&&!x.bankTxnId&&x.amount===bank.amount)
-   :list('expenses').filter(x=>x.status==='active'&&x.paymentMethod!=='現金'&&!x.bankTxnId&&x.amount===bank.amount);
+   :list('expenses').filter(x=>x.status==='active'&&B.bankExpenseEligible(x.paymentMethod)&&!x.bankTxnId&&x.amount===bank.amount);
   if(!pool.length)throw Error('同額の未照合対象がありません。新規入金や支出は自動作成しません');
   const choice=prompt('対象IDを入力してください（候補: '+pool.map(x=>x.id).join(', ')+'）',pool.length===1?pool[0].id:'');
   if(!choice)return;
@@ -289,6 +348,10 @@ document.addEventListener('submit',async e=>{
 });
 document.addEventListener('change',e=>{
  if(e.target.id==='calendar-month')render('schedule');
+});
+document.addEventListener('input',e=>{
+ const form=e.target.closest('form[data-action="document"]');
+ if(form)documentFormDraft=Object.fromEntries(new FormData(form));
 });
 render('home');
 })();

@@ -50,5 +50,39 @@ function calendarMonth(state,month,{weekStartsOn=0}={}){
  });
  return {month,weekStartsOn,cells,events};
 }
-return {internalEvents,calendarMonth};
+function onodaCandidates(state,month){
+ validMonth(month);
+ return B.list(state,'schedule').filter(event=>alive(event)&&event.googleStatus!=='cancelled'&&
+  event.kind==='小野田'&&event.date?.slice(0,7)===month)
+  .sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id))
+  .map(event=>({id:event.id,date:event.date,title:event.title,memo:event.description||'',quantity:event.onodaQuantity??null}));
+}
+function draftOnodaInvoice(state,{month,selectedIds,billing,invoiceDate}={}){
+ const candidates=onodaCandidates(state,month);
+ if(!Array.isArray(selectedIds)||!selectedIds.length||new Set(selectedIds).size!==selectedIds.length){
+  throw Error('小野田明細を重複なく選択してください');
+ }
+ const selected=new Set(selectedIds);
+ const rows=candidates.filter(row=>selected.has(row.id));
+ if(rows.length!==selected.size)throw Error('対象月の小野田明細を読み込み直してください');
+ if(rows.some(row=>typeof row.quantity!=='number'||!Number.isFinite(row.quantity)||row.quantity<=0)){
+  throw Error('選択した明細の施工数量を確認してください');
+ }
+ if(typeof billing?.customerName!=='string'||!billing.customerName.trim()||
+   !Number.isSafeInteger(billing.unitPrice)||billing.unitPrice<=0||typeof billing.taxable!=='boolean'){
+  throw Error('小野田請求先・単価・税区分の設定が必要です');
+ }
+ if(typeof invoiceDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)||
+   !Number.isFinite(Date.parse(invoiceDate))||new Date(invoiceDate).toISOString().slice(0,10)!==invoiceDate){
+  throw Error('請求日を確認してください');
+ }
+ return {
+  docType:'onoda',billingMonth:month,customerName:billing.customerName.trim(),invoiceDate,
+  items:rows.map(row=>({
+   content:row.title,qty:row.quantity,unit:'m',price:billing.unitPrice,taxable:billing.taxable,
+   sourceEventId:row.id,workDate:row.date,memo:row.memo,
+  })),
+ };
+}
+return {internalEvents,calendarMonth,onodaCandidates,draftOnodaInvoice};
 });
