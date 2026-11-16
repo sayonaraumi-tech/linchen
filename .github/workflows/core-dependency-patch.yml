@@ -5,6 +5,8 @@ on:
       - security/core-dependency-patch-20261116
     paths:
       - package.json
+      - tests/firestore-rules.test.cjs
+      - .github/workflows/core-dependency-patch.yml
 permissions:
   contents: write
 jobs:
