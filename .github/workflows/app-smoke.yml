@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install isolated browser test dependency
-        run: npm install --no-save --ignore-scripts playwright@1.62.1
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Exercise local stand-alone app with preserved test data

@@ -22,7 +22,7 @@ function paymentsRegister(s,p={}){
  const w=period(p);return B.list(s,'payments').filter(active).filter(x=>included(x.paymentDate,w)).map(x=>({id:x.id,saleId:x.saleId,paymentDate:x.paymentDate,amount:amount(x),method:x.method,confirmation:x.confirmation,bankTxnId:x.bankTxnId||''})).sort((a,b)=>a.paymentDate.localeCompare(b.paymentDate)||a.id.localeCompare(b.id));
 }
 function expensesRegister(s,p={}){
- const w=period(p);return B.list(s,'expenses').filter(active).filter(x=>included(x.expenseDate,w)).map(x=>({id:x.id,expenseDate:x.expenseDate,vendor:x.vendor,description:x.description,category:x.category,amount:amount(x),paymentMethod:x.paymentMethod,bankTxnId:x.bankTxnId||''})).sort((a,b)=>a.expenseDate.localeCompare(b.expenseDate)||a.id.localeCompare(b.id));
+ const w=period(p);return B.list(s,'expenses').filter(active).filter(x=>included(x.expenseDate,w)).map(x=>({id:x.id,expenseDate:x.expenseDate,vendor:x.vendor,description:x.description,category:x.category,amount:amount(x),paymentMethod:x.paymentMethod,bankTxnId:x.bankTxnId||'',paymentStatus:B.representativeAdvance(x.paymentMethod)?'立替未精算':x.paymentMethod==='現金'||x.bankTxnId?'支払済':'支払待ち'})).sort((a,b)=>a.expenseDate.localeCompare(b.expenseDate)||a.id.localeCompare(b.id));
 }
 function cashRegister(s,p={}){
  const w=period(p);let balance=0;

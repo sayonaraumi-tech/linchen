@@ -29,3 +29,28 @@ test('voided schedules disappear but historical documents remain available separ
  s=run(s,'void',{type:'voidRecord',collection:'schedule',id,reason:'取消'});
  assert.equal(C.calendarMonth(s,'2026-11').events.length,0);
 });
+
+test('Onoda draft includes only selected same-month schedules and preserves the source IDs',()=>{
+ let s=B.emptyState();
+ const schedule=(id,date,kind,onodaQuantity)=>({
+  type:'saveSchedule',id,date,kind,onodaQuantity,title:'クロス張替',description:'現場備考',
+ });
+ s=run(s,'one',schedule('selected','2026-11-12','小野田',8.5));
+ s=run(s,'two',schedule('missing','2026-11-18','小野田',null));
+ s=run(s,'three',schedule('other-month','2026-12-02','小野田',2));
+ s=run(s,'four',schedule('other-kind','2026-11-10','見積',null));
+ const args={month:'2026-11',selectedIds:['selected'],invoiceDate:'2026-11-30',
+  billing:{customerName:'検証取引先',unitPrice:830,taxable:false}};
+ const Calendar=require('../src/core/schedule-calendar');
+ const before=JSON.stringify(s);
+ assert.deepEqual(Calendar.onodaCandidates(s,'2026-11').map(x=>x.id),['selected','missing']);
+ const draft=Calendar.draftOnodaInvoice(s,args);
+ assert.deepEqual(draft.items,[{content:'クロス張替',qty:8.5,unit:'m',price:830,taxable:false,
+  sourceEventId:'selected',workDate:'2026-11-12',memo:'現場備考'}]);
+ assert.equal(draft.invoiceNo,undefined);
+ assert.equal(JSON.stringify(s),before);
+ assert.throws(()=>Calendar.draftOnodaInvoice(s,{...args,selectedIds:['missing']}),/施工数量/);
+ assert.throws(()=>Calendar.draftOnodaInvoice(s,{...args,selectedIds:['other-month']}),/読み込み直し/);
+ assert.throws(()=>Calendar.draftOnodaInvoice(s,{...args,selectedIds:['selected','selected']}),/重複/);
+ assert.throws(()=>Calendar.draftOnodaInvoice(s,{...args,billing:undefined}),/設定/);
+});

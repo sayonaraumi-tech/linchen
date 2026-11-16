@@ -13,4 +13,7 @@ table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}th,td{pad
 .day-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}.day{border:1px solid #ddd;min-height:72px;padding:4px;font-size:11px;overflow-wrap:anywhere}
 .day.outside{background:#f6f6f6;color:#777}.event{background:#ececec;padding:2px;margin-top:3px}
 .inline-actions{display:flex;gap:4px;flex-wrap:wrap}.danger{color:#a12424}
+dialog{width:min(44rem,calc(100% - 24px));max-height:85vh;border:1px solid #bbb;border-radius:4px;overflow:auto}
+dialog::backdrop{background:#0006}dialog form .table-scroller{flex-basis:100%;grid-column:1/-1}
+dialog input[type=checkbox]{min-width:0;width:auto}dialog [role=alert]{color:#a12424}
 @media(max-width:600px){header,main{padding:9px}.day{min-height:64px}form{display:grid;grid-template-columns:1fr 1fr}input,select,textarea{min-width:0;width:100%}form button{grid-column:span 2}.metric{min-width:125px}}

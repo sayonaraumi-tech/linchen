@@ -307,3 +307,53 @@ test('editing a bank-paid expense never silently changes it into cash',async()=>
   assert.equal(Object.keys(data.collections.cashLedger).length,0);
  }finally{await app.close();}
 });
+
+test('Onoda selection rejects incomplete rows and loads a draft without accounting writes at desktop and mobile widths',async()=>{
+ const app=await create();
+ try{
+  for(const width of [1280,390]){
+   await app.page.goto(app.site.url);
+   await app.page.evaluate(()=>localStorage.clear());
+   await app.page.reload();
+   await app.page.setViewportSize({width,height:900});
+   await app.page.getByRole('button',{name:'帳票',exact:true}).click();
+   await app.page.getByRole('textbox',{name:'宛名'}).fill('未保存の帳票');
+   await app.page.getByRole('button',{name:'日程',exact:true}).click();
+   for(const [title,quantity] of [['施工済みの小野田明細','8.5'],['数量確認中の明細','']]){
+    await app.page.locator('input[name=date]').fill('2026-11-12');
+    await app.page.locator('input[name=title]').fill(title);
+    await app.page.locator('select[name=kind]').selectOption('小野田');
+    await app.page.locator('input[name=onodaQuantity]').fill(quantity);
+    await app.page.getByRole('button',{name:'日程を保存'}).click();
+    await app.page.waitForFunction(()=>document.querySelector('#status').textContent.includes('保存しました'));
+   }
+   await app.page.locator('#calendar-month').fill('2026-11');
+   const before=await app.page.evaluate(()=>localStorage.getItem('linchen_independent_test_v1'));
+   await app.page.getByRole('button',{name:'小野田明細読込 → 請求書'}).click();
+   const modal=app.page.getByRole('dialog');
+   await modal.getByRole('checkbox',{name:'数量確認中の明細'}).check();
+   await modal.getByLabel('請求先').fill('検証取引先');
+   await modal.getByLabel('請求日').fill('2026-11-30');
+   await modal.getByLabel('確認済単価（円）').fill('830');
+   await modal.getByLabel('税区分').selectOption('taxable');
+   await modal.getByRole('button',{name:'明細を読み込む'}).click();
+   assert.match(await modal.getByRole('alert').textContent(),/施工数量/);
+   await modal.getByRole('checkbox',{name:'数量確認中の明細'}).uncheck();
+   if(process.env.LINCHEN_BROWSER_EVIDENCE){
+    await app.page.screenshot({path:process.env.LINCHEN_BROWSER_EVIDENCE+'/onoda-selection-'+width+'.png',fullPage:true});
+   }
+   app.page.once('dialog',dialog=>dialog.dismiss());
+   await modal.getByRole('button',{name:'明細を読み込む'}).click();
+   assert.ok(await modal.isVisible());
+   app.page.once('dialog',dialog=>dialog.accept());
+   await modal.getByRole('button',{name:'明細を読み込む'}).click();
+   await app.page.getByRole('heading',{name:'2026-11 小野田請求書・編集中'}).waitFor();
+   assert.match(await app.page.locator('#page').innerText(),/施工済みの小野田明細/);
+   assert.doesNotMatch(await app.page.locator('#page').innerText(),/数量確認中の明細/);
+   assert.equal(await app.page.evaluate(()=>localStorage.getItem('linchen_independent_test_v1')),before);
+   if(process.env.LINCHEN_BROWSER_EVIDENCE){
+    await app.page.screenshot({path:process.env.LINCHEN_BROWSER_EVIDENCE+'/onoda-draft-'+width+'.png',fullPage:true});
+   }
+  }
+ }finally{await app.close();}
+});
