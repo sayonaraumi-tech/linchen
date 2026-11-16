@@ -17,5 +17,8 @@
     "firebase": "^13.3.0",
     "firebase-tools": "^15.36.0",
     "playwright": "^1.65.1"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.13.6"
   }
 }
