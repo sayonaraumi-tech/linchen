@@ -655,3 +655,17 @@ test('two devices: CSV and bank new expense share a transaction identity under u
   assert.equal(JSON.stringify(await one.listRecords('expenses')),before);
  }finally{one.dispose();two.dispose();}
 });
+
+
+test('inherited operation result privacy protects other users and missing-ID replay', async()=>{
+ await env.withSecurityRulesDisabled(async ctx=>{
+  const store=ctx.firestore();
+  await setDoc(doc(store,`companies/${company}/operations/admin-backup`),{actorId:'uid-admin',createdAt:new Date(),fingerprint:'admin',result:{backup:{bankAmount:500000}}});
+  await setDoc(doc(store,`companies/${company}/operations/staff-own`),{actorId:'uid-staff',createdAt:new Date(),fingerprint:'staff',result:{ok:true}});
+ });
+ await assertFails(getDoc(doc(db('staff'),`companies/${company}/operations/admin-backup`)));
+ await assertSucceeds(getDoc(doc(db('staff'),`companies/${company}/operations/staff-own`)));
+ await assertSucceeds(getDoc(doc(db('staff'),`companies/${company}/operations/never-created`)));
+ await assertFails(getDocs(collection(db('staff'),`companies/${company}/operations`)));
+ await assertSucceeds(getDoc(doc(db('admin'),`companies/${company}/operations/admin-backup`)));
+});
