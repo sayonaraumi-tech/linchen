@@ -16,6 +16,8 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-fund
+      - name: Separately assess production-only dependencies
+        run: npm audit --omit=dev --audit-level=high
       - name: Reject high/critical dependency advisories
         run: npm audit --audit-level=high
   history-secret-scan:
