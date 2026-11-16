@@ -1,0 +1,68 @@
+name: Original PDF parity
+on:
+  push:
+    branches: [develop/tsukinowa-construction]
+    paths:
+      - 'legacy-pdf/**'
+      - 'tests/legacy-pdf-real.cjs'
+      - 'tests/business-pdf-integration.cjs'
+      - 'src/core/business.js'
+      - 'src/core/document-numbering.js'
+      - '.github/workflows/pdf-parity.yml'
+permissions:
+  contents: read
+jobs:
+  pdf-real:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: sayonaraumi-tech/geruninn
+          ref: 6674e019731b7fbc490e52e32fed348f7c0b7a6d
+          path: _original
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install PDF test dependencies
+        run: npm install --no-save --ignore-scripts playwright@1.62.1 html2pdf.js@0.10.1
+      - name: Install Poppler PDF tools
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify original JS and HTML blob identities
+        run: |
+          node - <<'NODE'
+          const fs=require('fs'),crypto=require('crypto'),assert=require('assert');
+          const m=JSON.parse(fs.readFileSync('legacy-pdf/source-manifest.json'));
+          for(const [file,sha] of Object.entries(m.files)){
+            const src=fs.readFileSync('_original/'+file);
+            const dst=fs.readFileSync('legacy-pdf/source/'+file);
+            const gitBlob=x=>crypto.createHash('sha1').update('blob '+x.length+'\0').update(x).digest('hex');
+            assert.equal(gitBlob(src),sha,file+' reference blob mismatch');
+            assert.equal(gitBlob(dst),sha,file+' migrated blob mismatch');
+          }
+          console.log('PASS '+Object.keys(m.files).length+' exact original source files');
+          NODE
+      - name: Generate and compare real document PDFs
+        env:
+          OLD_ROOT: _original
+          NEW_ROOT: legacy-pdf/source
+          PDF_OUT: pdf-evidence
+        run: node tests/legacy-pdf-real.cjs
+      - name: Real new-business documents through original PDF renderer
+        env:
+          OLD_ROOT: _original
+          NEW_ROOT: legacy-pdf/source
+          INTEGRATION_PDF_OUT: pdf-business-evidence
+        run: node tests/business-pdf-integration.cjs
+      - name: Preserve PDF evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: four-document-pdf-parity
+          path: |
+            pdf-evidence/
+            pdf-business-evidence/
+          if-no-files-found: warn

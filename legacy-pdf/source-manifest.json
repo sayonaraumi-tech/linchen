@@ -1,0 +1,24 @@
+{
+  "sourceRepo": "sayonaraumi-tech/geruninn",
+  "sourceCommit": "6674e019731b7fbc490e52e32fed348f7c0b7a6d",
+  "note": "These are Git blob SHA-1 hashes for exact source identity, not PDF pixel comparison.",
+  "files": {
+    "index.html": "a2f1304cb08b48effeeb2541860730b3b977f2e0",
+    "js/business-domain.js": "d80993439dc5c6f2ba8654d402dbc5caa7989167",
+    "js/accounting.js": "cbd8688e51130e9bba76f89ad1cd96806d182d11",
+    "js/accounting-domain.js": "ef77ea8b9b9b860f95b1df5d2c5209baa9c2a178",
+    "js/cloud-core.js": "eeffa31fe74f5f66ed3b8d93d677224bf19ab200",
+    "js/business-sync.js": "a7c717d48074e71d153d1ec03949b3d9725fce23",
+    "js/firebase-driver.js": "bf2ee18e2adf4711c9f70a7f93f685934633c563",
+    "js/business-ui.js": "6dc0aeb742d462290ec9b94852ec8238cc901c1e",
+    "js/accounting-ui.js": "22e745020e3fa630f70735c5e4fdd14447785f4d",
+    "js/outstanding.js": "6656e77030d8df61a6753976068ba9610be324bf",
+    "js/outstanding-ui.js": "79be31fbc840c390b17d53c43bbb0fc966fdc914",
+    "js/historical-import.js": "35f21381d3e38a14cb7d8a5386f4c866dc5fffb8",
+    "js/historical-import-ui.js": "52dc2045f09167eb26b99301f51a4447d7722ace",
+    "js/year-end.js": "b5e03593db2fe992def7059ef57e5c3a761e91d5",
+    "js/year-end-ui.js": "209d66d0831a9da599ba6c36758ffab3d58ddf38",
+    "js/cloud-ui.js": "1f0ca7883b662edf786c5a48465a6190f1a070f6",
+    "js/test-data-cleanup.js": "6ae15d7c5ebed9fc85ab3fc5ba5df9a94461e106"
+  }
+}

@@ -1,0 +1,96 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const B=require('../src/core/business');
+const x=(s,operationId,cmd)=>B.perform(s,{operationId,...cmd}).state;
+test('estimate is not revenue; invoice creates exactly one sale even on retry',()=>{
+ let s=B.emptyState();
+ s=x(s,'customer',{type:'saveCustomer',name:'試験株式会社'});
+ s=x(s,'schedule',{type:'saveSchedule',date:'2026-11-16',title:'内装工事',customer:'試験株式会社'});
+ const schedule=B.list(s,'schedule')[0].id;
+ const e={docType:'estimate',sourceKey:'estimate-1',amount:11000,snapshot:{customerName:'試験株式会社',invoiceDate:'2026-11-13',items:[{content:'壁紙',qty:10,price:1000}]}};
+ s=x(s,'estimate',{type:'issueDocument',...e});
+ assert.equal(B.getOverview(s).sales,0);
+ s=x(s,'invoice',{type:'issueDocument',...e,docType:'invoice',sourceKey:'invoice-1',scheduleId:schedule});
+ assert.equal(B.getOverview(s).sales,11000);
+ s=x(s,'invoice',{type:'issueDocument',...e,docType:'invoice',sourceKey:'invoice-1',scheduleId:schedule});
+ assert.equal(B.list(s,'sales').length,1);
+ assert.equal(B.list(s,'documents').length,2);
+});
+test('manual registration followed by invoice reuses sale',()=>{
+ let s=B.emptyState();s=x(s,'ev',{type:'saveSchedule',date:'2026-11-16',title:'工事',customer:'A'});
+ const ev=B.list(s,'schedule')[0].id;
+ s=x(s,'sale',{type:'registerScheduleSale',scheduleId:ev,amount:11000});
+ s=x(s,'doc',{type:'issueDocument',docType:'invoice',scheduleId:ev,sourceKey:'i1',amount:11000,snapshot:{customerName:'A',invoiceDate:'2026-11-16',items:[]}});
+ assert.equal(B.list(s,'sales').length,1);
+ assert.equal(B.getOverview(s).sales,11000);
+});
+test('cash receipt mirrors one sale, one confirmed payment and one cash line',()=>{
+ let s=B.emptyState();
+ const receipt={type:'issueDocument',docType:'receipt',sourceKey:'receipt-1',snapshot:{customerName:'A',invoiceDate:'2026-11-13',receiptTotal:'11000',paymentMethod:'現金',tadashi:'壁紙修理代'}};
+ s=x(s,'receipt',{...receipt});
+ s=x(s,'retry-with-different-operation-id',{...receipt});
+ assert.equal(B.list(s,'sales').length,1);
+ assert.equal(B.list(s,'payments').length,1);
+ assert.equal(B.list(s,'cashLedger').length,1);
+ assert.deepEqual(B.getOverview(s),{otherIncome:0,sales:11000,confirmedPayments:11000,outstanding:0,expenses:0,cashIn:11000,cashOut:0,salesCount:1,expenseCount:0});
+});
+test('bank pending payment is confirmed only by real matching bank row',()=>{
+ let s=B.emptyState();
+ s=x(s,'sale',{type:'issueDocument',docType:'invoice',sourceKey:'i1',amount:11000,snapshot:{customerName:'A',invoiceDate:'2026-11-10'}});
+ const sale=B.list(s,'sales')[0].id;
+ s=x(s,'pay',{type:'registerPayment',saleId:sale,amount:11000,paymentDate:'2026-11-11',method:'銀行振込'});
+ assert.equal(B.getOverview(s).outstanding,11000);
+ s=x(s,'bank',{type:'importBankTransaction',account:'GMO',externalId:'test-row-1',amount:11000,direction:'income',date:'2026-11-13'});
+ const bank=B.list(s,'bankTransactions')[0].id,pay=B.list(s,'payments')[0].id;
+ s=x(s,'match',{type:'matchBankPayment',bankTxnId:bank,paymentId:pay});
+ assert.equal(B.getOverview(s).sales,11000);
+ assert.equal(B.getOverview(s).confirmedPayments,11000);
+ assert.equal(B.getOverview(s).outstanding,0);
+ s=x(s,'import-same-bank',{type:'importBankTransaction',account:'GMO',externalId:'test-row-1',amount:11000,direction:'income',date:'2026-11-13'});
+ assert.equal(B.list(s,'bankTransactions').length,1);
+ s=x(s,'unmatch',{type:'unmatchBank',bankTxnId:bank});
+ assert.equal(B.getOverview(s).outstanding,11000);
+});
+test('cash expenses create cash line, company card expenses do not',()=>{
+ let s=B.emptyState();
+ s=x(s,'exp1',{type:'saveExpense',vendor:'資材屋',expenseDate:'2026-11-10',category:'材料費',amount:3000,paymentMethod:'現金'});
+ s=x(s,'exp2',{type:'saveExpense',vendor:'資材屋',expenseDate:'2026-11-10',category:'材料費',amount:4000,paymentMethod:'法人信用カード'});
+ assert.equal(B.getOverview(s).cashOut,3000);
+ assert.equal(B.getOverview(s).expenses,7000);
+ const card=B.list(s,'expenses').find(e=>e.paymentMethod==='法人信用カード');
+ s=x(s,'out',{type:'importBankTransaction',account:'GMO',externalId:'card-out-1',amount:4000,direction:'outgoing',date:'2026-11-12'});
+ const bank=B.list(s,'bankTransactions')[0];
+ s=x(s,'match',{type:'matchBankExpense',bankTxnId:bank.id,expenseId:card.id});
+ assert.equal(B.getOverview(s).expenses,7000);
+});
+test('failed operations roll back, and noncash delete blocked in production',()=>{
+ let s=B.emptyState('production');
+ s=x(s,'save',{type:'saveProject',customer:'A'});
+ const original=JSON.stringify(s),id=B.list(s,'projects')[0].id;
+ assert.throws(()=>B.perform(s,{operationId:'bad',type:'deleteTestRecord',collection:'projects',id,confirmTestDeletion:true}),/正式データ/);
+ assert.equal(JSON.stringify(s),original);
+ assert.throws(()=>B.perform(s,{operationId:'badAmount',type:'saveExpense',vendor:'X',category:'費用',amount:'2.2',expenseDate:'2026-11-10',paymentMethod:'現金'}),/整数/);
+ assert.equal(JSON.stringify(s),original);
+});
+test('test records can be individually deleted with explicit confirmation; linked cash cannot be orphaned',()=>{
+ let s=B.emptyState();
+ s=x(s,'p1',{type:'saveProject',customer:'A'});
+ s=x(s,'p2',{type:'saveProject',customer:'B'});
+ const project=B.list(s,'projects')[0].id;
+ assert.throws(()=>B.perform(s,{operationId:'delete',type:'deleteTestRecord',collection:'projects',id:project}),/確認/);
+ s=x(s,'delete',{type:'deleteTestRecord',collection:'projects',id:project,confirmTestDeletion:true});
+ assert.equal(B.list(s,'projects').length,1);
+ s=x(s,'cash',{type:'issueDocument',docType:'receipt',sourceKey:'cash1',snapshot:{customerName:'A',invoiceDate:'2026-11-13',receiptTotal:1000,paymentMethod:'現金'}});
+ const pay=B.list(s,'payments')[0].id;
+ assert.throws(()=>B.perform(s,{operationId:'bad-delete',type:'deleteTestRecord',collection:'payments',id:pay,confirmTestDeletion:true}),/関連記録/);
+});
+test('void cash expense also voids linked ledger, audit remains',()=>{
+ let s=B.emptyState();
+ s=x(s,'expense',{type:'saveExpense',vendor:'A',expenseDate:'2026-11-13',category:'材料費',amount:900,paymentMethod:'現金'});
+ const id=B.list(s,'expenses')[0].id;
+ s=x(s,'void',{type:'voidRecord',collection:'expenses',id,reason:'入力ミス'});
+ assert.equal(B.getOverview(s).expenses,0);
+ assert.equal(B.getOverview(s).cashOut,0);
+ assert.equal(B.list(s,'expenses').length,1);
+ assert.equal(B.list(s,'auditLogs').length,2);
+});

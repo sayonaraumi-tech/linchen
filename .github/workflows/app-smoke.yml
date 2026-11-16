@@ -1,0 +1,36 @@
+name: Independent application smoke
+on:
+  push:
+    branches: [develop/tsukinowa-construction]
+    paths:
+      - 'app/**'
+      - 'src/core/**'
+      - 'src/storage/sandbox.js'
+      - 'scripts/serve-workbench.cjs'
+      - 'tests/workbench-browser.cjs'
+      - '.github/workflows/app-smoke.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'src/core/**'
+      - 'src/storage/sandbox.js'
+      - 'scripts/serve-workbench.cjs'
+      - 'tests/workbench-browser.cjs'
+      - '.github/workflows/app-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated browser test dependency
+        run: npm install --no-save --ignore-scripts playwright@1.62.1
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Exercise local stand-alone app with preserved test data
+        run: node --test tests/workbench-browser.cjs
