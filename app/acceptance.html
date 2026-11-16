@@ -21,6 +21,21 @@
       <label>パスワード<input name="password" type="password" autocomplete="current-password" required></label>
       <button type="submit">ログイン</button>
     </form>
+    <button id="password-reset" type="button" hidden>初回設定・パスワード再設定</button>
+    <form id="mfa-sign-in" hidden>
+      <label>認証アプリのコード<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label>
+      <button type="submit">認証を完了</button>
+    </form>
+  </section>
+  <section id="mfa-enrollment" hidden>
+    <h2>管理者の二段階認証</h2>
+    <button id="verify-email" type="button" hidden>確認メールを送信</button>
+    <button id="start-enrollment" type="button" hidden>認証アプリを設定</button>
+    <form id="confirm-enrollment" hidden>
+      <label>認証アプリへ登録するキー<input id="enrollment-key" readonly></label>
+      <label>認証アプリのコード<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label>
+      <button type="submit">二段階認証を登録</button>
+    </form>
   </section>
   <p id="connection" role="status"></p>
   <section id="workspace" hidden>

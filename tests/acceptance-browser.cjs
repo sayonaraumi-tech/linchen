@@ -8,10 +8,11 @@ const {join} = require('node:path');
 const {randomUUID} = require('node:crypto');
 const {initializeApp, deleteApp} = require('firebase-admin/app');
 const {getAuth} = require('firebase-admin/auth');
-const {getFirestore, Timestamp} = require('firebase-admin/firestore');
-const {createHash} = require('node:crypto');
+const {getFirestore} = require('firebase-admin/firestore');
+const {createHash, randomBytes} = require('node:crypto');
 const {chromium} = require('playwright');
 const {serve} = require('../scripts/serve-acceptance.cjs');
+const {exportTenant, restoreTenant} = require('../services/api/tenant-backup.cjs');
 
 const projectId = 'demo-tsukinowa-construction';
 const companyId = 'linchen-isolated-browser';
@@ -205,7 +206,7 @@ test('isolated browser sign-in, nine pages, trusted commands, shared reads and P
   const source = db.collection('companies').doc(companyId);
   const restored = restoreDb.collection('companies').doc(companyId);
   const paths = ['settings', 'customers', 'projects', 'schedule', 'documents', 'sales', 'payments',
-    'expenses', 'cashLedger', 'bankTransactions', 'suppliers', 'supplierTransactions', 'auditLogs',
+    'expenses', 'cashLedger', 'bankTransactions', 'suppliers', 'supplierTransactions', 'calendarLinks', 'auditLogs',
     'operations', 'documentNumbers', 'pdfArchives'];
   function hash(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
   const dataset = {};
@@ -231,27 +232,19 @@ test('isolated browser sign-in, nine pages, trusted commands, shared reads and P
   assert.equal(dataset.cashLedger.find(record => record.data.payload.sourceId === cashPayment.id).data.payload.amount, 4620);
   const exportRoot = await mkdtemp(join(tmpdir(), 'linchen-restore-'));
   t.after(() => rm(exportRoot, {recursive: true, force: true}));
-  const exportPath = join(exportRoot, 'backup.json');
-  const backupBytes = Buffer.from(JSON.stringify(dataset));
+  const exportPath = join(exportRoot, 'backup.enc');
+  const key = randomBytes(32);
+  const backupBytes = await exportTenant(db, companyId, key);
   await writeFile(exportPath, backupBytes, {mode: 0o600});
   const bytesFromDisk = await readFile(exportPath);
   assert.equal(hash(bytesFromDisk), hash(backupBytes));
-  // This decoder handles the only Firestore-specific types in this synthetic backup.
-  const backup = JSON.parse(bytesFromDisk.toString(), (_, value) => {
-    if (value && typeof value === 'object') {
-      if (value.type === 'Buffer' && Array.isArray(value.data)) return Buffer.from(value.data);
-      if (Number.isInteger(value._seconds) && Number.isInteger(value._nanoseconds)) {
-        return new Timestamp(value._seconds, value._nanoseconds);
-      }
-    }
-    return value;
-  });
-  const batch = restoreDb.batch();
-  for (const [name, entries] of Object.entries(backup)) {
+  await assert.rejects(restoreTenant(restoreDb, companyId, bytesFromDisk, randomBytes(32)));
+  for (const name of Object.keys(dataset)) {
     assert.equal((await restored.collection(name).get()).size, 0);
-    for (const entry of entries) batch.create(restored.collection(name).doc(entry.id), entry.data);
   }
-  await batch.commit();
+  const recovered = await restoreTenant(restoreDb, companyId, bytesFromDisk, key);
+  assert.equal(recovered.count, Object.values(dataset).reduce((count, entries) => count + entries.length, 0));
+  assert.equal((await restoreTenant(restoreDb, companyId, bytesFromDisk, key)).count, recovered.count);
   for (const [name, entries] of Object.entries(dataset)) {
     const result = await restored.collection(name).get();
     assert.deepEqual(result.docs.map(record => ({id: record.id, data: record.data()})), entries);

@@ -1,14 +1,16 @@
+import {FirebaseError} from 'firebase/app';
 import {initializeApp, type FirebaseOptions} from 'firebase/app';
 import {
   connectAuthEmulator, getAuth, inMemoryPersistence, onAuthStateChanged, setPersistence,
-  signInWithEmailAndPassword, signOut, type User,
+  signInWithEmailAndPassword, signOut, getMultiFactorResolver, multiFactor, TotpMultiFactorGenerator,
+  sendEmailVerification, sendPasswordResetEmail, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User,
 } from 'firebase/auth';
 
 type RecordPayload = {id: string} & Record<string, unknown>;
 type State = {collections: Record<string, Record<string, RecordPayload>>};
 type Workspace = {state: State; revision: number | null; role: 'admin' | 'staff'};
 type Command = {type: string; operationId: string} & Record<string, unknown>;
-type Configuration = {firebase: FirebaseOptions; authEmulator: string};
+type Configuration = {firebase: FirebaseOptions; authEmulator: string | null; cloud: boolean};
 
 const login = document.querySelector<HTMLElement>('#login')!;
 const workspace = document.querySelector<HTMLElement>('#workspace')!;
@@ -128,15 +130,54 @@ async function boot() {
   if (!response.ok) throw Error('接続設定を取得できません');
   const config = await response.json() as Configuration;
   const auth = getAuth(initializeApp(config.firebase));
-  connectAuthEmulator(auth, config.authEmulator, {disableWarnings: true});
+  if (config.authEmulator) connectAuthEmulator(auth, config.authEmulator, {disableWarnings: true});
   await setPersistence(auth, inMemoryPersistence);
+  const verification = document.querySelector<HTMLButtonElement>('#verify-email')!;
+  const enrollment = document.querySelector<HTMLElement>('#mfa-enrollment')!;
+  const startEnrollment = document.querySelector<HTMLButtonElement>('#start-enrollment')!;
+  const confirmEnrollment = document.querySelector<HTMLFormElement>('#confirm-enrollment')!;
+  const enrollmentKey = document.querySelector<HTMLInputElement>('#enrollment-key')!;
+  const secondFactor = document.querySelector<HTMLFormElement>('#mfa-sign-in')!;
+  const passwordReset = document.querySelector<HTMLButtonElement>('#password-reset')!;
+  let resolver: MultiFactorResolver | null = null;
+  let secret: TotpSecret | null = null;
+  let mfaPending = false;
+  passwordReset.hidden = !config.cloud;
   onAuthStateChanged(auth, async next => {
     clearWorkspace();
     user = next;
+    secret = null;
+    enrollmentKey.value = '';
+    enrollment.hidden = true;
+    confirmEnrollment.hidden = true;
+    secondFactor.hidden = true;
+    signInForm.hidden = false;
+    mfaPending = false;
     login.hidden = Boolean(next);
     signOutButton.hidden = !next;
-    if (next) await refresh();
+    if (!next) return;
+    try {
+      if (config.cloud) {
+        const {claims, signInSecondFactor} = await next.getIdTokenResult();
+        if (next !== user) return;
+        if (claims.role === 'admin' && (!next.emailVerified || signInSecondFactor !== 'totp')) {
+          mfaPending = true;
+          enrollment.hidden = false;
+          verification.hidden = next.emailVerified;
+          startEnrollment.hidden = !next.emailVerified || multiFactor(next).enrolledFactors.length > 0;
+          connection.textContent = next.emailVerified ?
+            '認証アプリで二段階認証を設定してください。設定済みの場合は再ログインしてください。' :
+            'メールアドレスを確認し、再度ログインしてください。';
+          return;
+        }
+      }
+      await refresh();
+    } catch {
+      connection.textContent = 'セッションを確認できません。再度ログインしてください。';
+    }
   });
+
+  function code(form: HTMLFormElement) { return String(new FormData(form).get('code')); }
 
   signInForm.addEventListener('submit', async event => {
     event.preventDefault();
@@ -146,18 +187,82 @@ async function boot() {
     try {
       await signInWithEmailAndPassword(auth, String(data.get('email')), String(data.get('password')));
       signInForm.reset();
-    } catch {
-      connection.textContent = 'ログインできません。入力内容と接続状態を確認してください。';
+    } catch (error) {
+      if (error instanceof FirebaseError && error.code === 'auth/multi-factor-auth-required') {
+        resolver = getMultiFactorResolver(auth, error as MultiFactorError);
+        signInForm.reset();
+        signInForm.hidden = true;
+        secondFactor.hidden = false;
+        connection.textContent = '認証アプリのコードを入力してください。';
+      } else {
+        connection.textContent = 'ログインできません。入力内容と接続状態を確認してください。';
+      }
     } finally {
       submit.disabled = false;
     }
   });
+  secondFactor.addEventListener('submit', async event => {
+    event.preventDefault();
+    const hint = resolver?.hints.find(item => item.factorId === TotpMultiFactorGenerator.FACTOR_ID);
+    if (!resolver || !hint) return;
+    try {
+      await resolver.resolveSignIn(TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code(secondFactor)));
+      secondFactor.reset();
+      resolver = null;
+    } catch {
+      connection.textContent = '認証コードを確認してください。';
+    }
+  });
+  passwordReset.addEventListener('click', async () => {
+    const email = signInForm.querySelector<HTMLInputElement>('[name=email]')!;
+    if (!email.reportValidity()) return;
+    try {
+      await sendPasswordResetEmail(auth, email.value);
+    } catch {
+      // A generic response prevents the UI from revealing account membership.
+    }
+    connection.textContent = '登録済みの場合、パスワード設定メールが届きます。';
+  });
+  verification.addEventListener('click', async () => {
+    if (!user) return;
+    try {
+      await sendEmailVerification(user);
+      connection.textContent = 'メールを確認し、ログアウト後に再ログインしてください。';
+    } catch {
+      connection.textContent = 'メールを送信できませんでした。時間をおいて再試行してください。';
+    }
+  });
+  startEnrollment.addEventListener('click', async () => {
+    const actor = user;
+    if (!actor || !actor.emailVerified) return;
+    try {
+      const generated = await TotpMultiFactorGenerator.generateSecret(await multiFactor(actor).getSession());
+      if (actor !== user) return;
+      secret = generated;
+      enrollmentKey.value = generated.secretKey;
+      confirmEnrollment.hidden = false;
+    } catch {
+      connection.textContent = '二段階認証を開始できませんでした。再ログインしてください。';
+    }
+  });
+  confirmEnrollment.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!user || !secret) return;
+    try {
+      await multiFactor(user).enroll(TotpMultiFactorGenerator.assertionForEnrollment(secret, code(confirmEnrollment)), 'Linchen');
+      confirmEnrollment.reset();
+      await signOut(auth);
+      connection.textContent = '登録しました。認証アプリを使用して再ログインしてください。';
+    } catch {
+      connection.textContent = '認証コードを確認してください。';
+    }
+  });
   signOutButton.addEventListener('click', () => { void signOut(auth); });
-  window.addEventListener('online', () => { void refresh(); });
+  window.addEventListener('online', () => { if (!mfaPending) void refresh(); });
   window.addEventListener('offline', () => {
     if (user) connection.textContent = 'オフラインです。再接続するまで変更を保存できません。';
   });
-  setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
+  setInterval(() => { if (!document.hidden && !mfaPending) void refresh(); }, config.cloud ? 30000 : 5000);
 }
 
 document.querySelector<HTMLSelectElement>('#theme')!.addEventListener('change', event => {

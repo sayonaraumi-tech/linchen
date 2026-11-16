@@ -100,7 +100,7 @@ function response(status, data) {
   return Response.json(data, {status, headers: {'Cache-Control': 'no-store'}});
 }
 
-function createCommandHandler({app, companyId}) {
+function createCommandHandler({app, companyId, requireAdminMfa = false}) {
   const projectId = app.options.projectId;
   if (!projectId || projectId === 'tsukinowa-business' || typeof companyId !== 'string' ||
       !safeId.test(companyId) || Object.hasOwn(Object.prototype, companyId)) {
@@ -125,6 +125,10 @@ function createCommandHandler({app, companyId}) {
     if (claims.companyId !== companyId || !['admin', 'staff'].includes(claims.role) || claims.linchenSandbox === true ||
         ((url.pathname === '/api/commands' || request.method === 'POST') && claims.role !== 'admin')) {
       return response(403, {error: 'forbidden'});
+    }
+    if (requireAdminMfa && claims.role === 'admin' &&
+        (claims.email_verified !== true || claims.firebase?.sign_in_second_factor !== 'totp')) {
+      return response(403, {error: 'mfa_required', message: '管理者は認証アプリで二段階認証してください'});
     }
 
     const repository = createTrustedRepository(app, {uid: claims.uid, companyId, role: claims.role});

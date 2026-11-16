@@ -38,4 +38,32 @@ LINCHEN_EVIDENCE_DIR=/absolute/path/to/evidence \
 ## 運用上の未検証事項
 
 クラウド HTTPS、招待と本番向け MFA、定期的な外部バックアップとアラート、実履歴の移行、運用上の電子取引保存適合性は別途実環境での検証が必要。
-このエントリは公開環境へのデプロイに使用できない。
+## クラウド受入
+
+`Dockerfile.acceptance` は同じサーバーをコンテナで実行する。クラウドモードの対象は
+`linchen-acceptance-20261116` のみで、エミュレーター変数が設定されていると起動を拒否する。
+ホスティングの TLS 終端を使用し、コンテナには Firebase の公開 Web 設定、会社 ID、および
+専用ランタイムの Google Application Default Credentials を別々に設定する。
+
+`LINCHEN_CLOUD_ACCEPTANCE=1`、`GCLOUD_PROJECT`、`LINCHEN_COMPANY`、
+`LINCHEN_FIREBASE_API_KEY` と `LINCHEN_FIREBASE_APP_ID` を設定する。
+Firestore は `firebase.acceptance.json` のルールでクライアントからの直接アクセスを拒否する。
+管理者の API アクセスには検証されたメールと TOTP で発行された Firebase トークンが必須。
+招待時は許可済み UID に会社 ID と役割を付与し、本人が初回パスワード設定と認証アプリの登録を行う。
+
+## バックアップと復旧
+
+受入テナントのスナップショットを一貫した読み取りで取得し、AES-256-GCM で暗号化する。
+アーカイブの PDF バイト列、銀行 CSV 原本、監査記録、正式番号を含む。
+個別に管理する 32 バイトのバックアップ鍵を権限 0600 のファイルに保管する。
+別途付与した読み取り専用 ADC と独立した書き込み先を用いる。
+
+```sh
+node scripts/tenant-backup.cjs export linchen-acceptance-20261116 TENANT /backup/dated-snapshot.enc
+node scripts/tenant-backup.cjs restore linchen-acceptance-restore-example TENANT /backup/dated-snapshot.enc
+```
+
+復旧環境は新規の独立プロジェクトを指定する。本番および受入データへの上書きは行わない。
+再実行は既存の同一レコードを照合し、競合時に中断する。
+ローカル受入では暗号化ファイルの実復旧、鍵不一致の拒否および再実行を確認する。
+クラウドの定期起動・別権限の保管先・アラートはホスティング設定時に検証する。
