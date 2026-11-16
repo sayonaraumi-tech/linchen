@@ -1,5 +1,10 @@
 /* Read-only finance projections; no UI and no source mutations. */
-const B=require('./business');
+(function(root,factory){
+ const api=factory(typeof module==='object'&&module.exports?require('./business'):root.TsukinowaCoreBusiness);
+ if(typeof module==='object'&&module.exports)module.exports=api;
+ else root.TsukinowaFinanceViews=api;
+})(globalThis,function(B){
+'use strict';
 const active=r=>!r.deletedAt&&r.status!=='void'&&r.status!=='cancelled';
 const yyyyMM=x=>String(x||'').slice(0,7);
 function period(value){
@@ -59,4 +64,5 @@ function csvEscape(value){const raw=String(value??'');const safe=/^[\s]*[=+@-]/.
 function exportCSV(headers,rows){return '\uFEFF'+[headers,...rows].map(row=>row.map(csvEscape).join(',')).join('\r\n')+'\r\n';}
 function exportSalesCSV(s,p){return exportCSV(['売上日','取引先','内容','売上','入金済','未入金','状態'],salesRegister(s,p).map(x=>[x.salesDate,x.customer,x.description,x.sales,x.paid,x.outstanding,x.status]));}
 function exportExpensesCSV(s,p){return exportCSV(['支出日','取引先','科目','内容','金額','支払方法'],expensesRegister(s,p).map(x=>[x.expenseDate,x.vendor,x.category,x.description,x.amount,x.paymentMethod]));}
-module.exports={period,salesRegister,paymentsRegister,expensesRegister,cashRegister,bankQueue,documentsHistory,dashboard,exportCSV,exportSalesCSV,exportExpensesCSV};
+return {period,salesRegister,paymentsRegister,expensesRegister,cashRegister,bankQueue,documentsHistory,dashboard,exportCSV,exportSalesCSV,exportExpensesCSV};
+});

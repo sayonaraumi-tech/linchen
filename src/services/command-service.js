@@ -9,6 +9,7 @@ const COLLECTIONS=Domain.COLLECTIONS.filter(k=>k!=='auditLogs');
 const clone=x=>JSON.parse(JSON.stringify(x));
 const json=x=>JSON.stringify(x);
 class RevisionConflict extends Error {}
+class DomainInputError extends Error {}
 async function requestHash(command){
  const canonical=(value)=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?
   Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
@@ -17,7 +18,7 @@ async function requestHash(command){
  const digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);
  return Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
 }
-function createCommandService({repository,maximumChanges=6,maximumRecords=2000}={}){
+function createCommandService({repository,maximumChanges=6,maximumRecords=2000, prepare=(state, command)=>command}={}){
  if(!repository||!['list','read','apply','readOperation'].every(k=>typeof repository[k]==='function'))throw Error('Transactional Firestore repository required');
  if(!Number.isInteger(maximumChanges)||maximumChanges<2||maximumChanges>8)throw Error('Invalid maximum changes');
  if(!Number.isInteger(maximumRecords)||maximumRecords<1||maximumRecords>10000)throw Error('Invalid maximum records');
@@ -58,7 +59,7 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
   if(command.expectedRevision!==undefined&&command.expectedRevision!==revision){
    throw new RevisionConflict('版数競合: 最新のデータを再読込してください');
   }
-  const editableCollection={saveCustomer:'customers',saveSchedule:'schedule'}[command.type];
+  const editableCollection={saveCustomer:'customers',saveSchedule:'schedule',saveExpense:'expenses'}[command.type];
   if(command.expectedRevision!==undefined&&command.id&&editableCollection){
    const original=snapshots[editableCollection+'/'+command.id]?.payload;
    if(!original)throw Error('編集対象の記録がありません');
@@ -69,7 +70,12 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
    }
   }
   const before=clone(state);
-  const result=Domain.perform(state,command);
+  let result;
+  try {
+   result=Domain.perform(state,prepare(state,command));
+  } catch(error) {
+   throw new DomainInputError(error.message,{cause:error});
+  }
   const changed=[];
   for(const collection of COLLECTIONS){
    for(const [id,payload] of Object.entries(result.state.collections[collection])){
@@ -103,4 +109,4 @@ function createCommandService({repository,maximumChanges=6,maximumRecords=2000}=
  }
  return {execute,load};
 }
-module.exports={createCommandService,META_ID,RevisionConflict};
+module.exports={createCommandService,META_ID,RevisionConflict,DomainInputError};

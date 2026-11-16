@@ -36,7 +36,7 @@ function validate(doc){
  if(typeof doc.snapshot.customerName!=='string'||doc.snapshot.customerName.length>500)throw Error('宛名が不正です');
  return JSON.parse(JSON.stringify(doc));
 }
-async function renderFormal({document}){
+async function renderFormal({document, isolated = false}){
  const doc=validate(document);
  const origin=await rendererOrigin();
  const browser=await(browserPromise||(browserPromise=chromium.launch({headless:true}).catch(e=>{browserPromise=null;throw e})));
@@ -53,17 +53,39 @@ async function renderFormal({document}){
    return route.abort();
   });
   await p.goto(origin+'/',{waitUntil:'load',timeout:20000});
-  const filename=await p.evaluate(({snapshot,docType,invoiceNo})=>{
+  const filename=await p.evaluate(({snapshot,docType,invoiceNo,id,amount,isolated})=>{
    if(snapshot.invoiceNo!==invoiceNo)throw Error('帳票番号の不一致');
-   applyFormState(JSON.parse(JSON.stringify(snapshot)),docType);
+   const archived=isolated?{
+    ...snapshot,historyId:id,invoiceRegNo:'',
+    remarks:[snapshot.remarks,'検証用・送付不可'].filter(Boolean).join(' ／ '),
+    ...(docType==='receipt'?{tadashi:'検証用・'+(snapshot.tadashi||'')}:{}),
+   }:snapshot;
+   if(isolated&&DOC_CONFIGS[docType].leftCardType==='bank'){
+    DOC_CONFIGS[docType].leftCard.rows=[
+     ['銀行','検証用'],['支店','—'],['口座番号','—'],['口座名義','—'],
+    ];
+   }
+   applyFormState(archived,docType);
    bizSwitchPage('chohyo');
    document.getElementById('previewArea').classList.add('show');
    const invoice=document.querySelector('#previewArea .invoice');
    fitInvoiceToOnePage(invoice,docType);
    const after=collectFormState();
    if(after.invoiceNo!==invoiceNo||after.customerName!==snapshot.customerName||after.docType!==docType)throw Error('保存済み帳票の内容確認に失敗');
+   if(isolated){
+    const visibleNumber=invoice.querySelector('#dNo')?.textContent;
+    const visibleAmount=invoice.querySelector('#dTotalHero')?.textContent;
+    if(visibleNumber!==invoiceNo||Number(visibleAmount?.replace(/,/g,''))!==amount){
+     throw Error('PDF表示の正式番号または金額が保存済み原本と一致しません');
+    }
+    if(docType!=='receipt'&&snapshot.items.some((item,index)=>
+     item.price!==after.items[index]?.price||item.qty!==after.items[index]?.qty||
+     (item.taxable!==false)!==(after.items[index]?.taxable!==false))){
+     throw Error('PDF表示の明細が保存済み原本と一致しません');
+    }
+   }
    return buildPrintFilename()+'.pdf';
-  },{snapshot:doc.snapshot,docType:doc.docType,invoiceNo:doc.invoiceNo});
+  },{snapshot:doc.snapshot,docType:doc.docType,invoiceNo:doc.invoiceNo,id:doc.id,amount:doc.amount,isolated});
   if(!filename.endsWith('.pdf'))throw Error('原版PDFファイル名に誤り');
   const pending=p.waitForEvent('download',{timeout:30000});
   await p.evaluate(()=>doPrint());
