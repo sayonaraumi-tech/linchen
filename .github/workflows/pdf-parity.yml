@@ -9,6 +9,15 @@ on:
       - 'src/core/business.js'
       - 'src/core/document-numbering.js'
       - '.github/workflows/pdf-parity.yml'
+  pull_request:
+    branches: [develop/tsukinowa-construction]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'legacy-pdf/**'
+      - 'tests/**'
+      - 'src/core/**'
+      - '.github/workflows/pdf-parity.yml'
 permissions:
   contents: read
 jobs:
