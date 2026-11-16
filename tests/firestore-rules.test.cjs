@@ -140,3 +140,27 @@ test('even a company admin cannot write without isolated sandbox claim',async()=
  const other=env.authenticatedContext('prod-admin-false',{role:'admin',companyId:'tsukinowa',linchenSandbox:false});
  await assertFails(sdk.setDoc(sdk.doc(other.firestore(),'companies/tsukinowa/settings/false-claim'),{test:true}));
 });
+
+test('hostile client matrix rejects direct financial edits, forged audit, cross-tenant and deletion',async()=>{
+ const admin=env.authenticatedContext('production-admin',{role:'admin',companyId:'tsukinowa'}).firestore();
+ const staff=env.authenticatedContext('production-staff',{role:'staff',companyId:'tsukinowa'}).firestore();
+ const forgedSandboxStaff=env.authenticatedContext('staff-sandbox',{role:'staff',companyId:'tsukinowa',linchenSandbox:true}).firestore();
+ const otherTenant=env.authenticatedContext('other-admin',{role:'admin',companyId:'other-company',linchenSandbox:true}).firestore();
+ const anon=env.unauthenticatedContext().firestore();
+ const c='companies/tsukinowa';
+ const forgedRecord={companyId:'tsukinowa',payload:{amount:990000,status:'paid'},revision:1,
+   createdBy:'production-admin',updatedBy:'production-admin',lastOperationId:'forged',lastAuditId:'forged_0'};
+ const forgedOperation={operationId:'forged',actorId:'production-admin',companyId:'tsukinowa',
+   targets:['payments/forged'],signature:'fake',action:'payment-confirm'};
+ for(const collectionName of ['sales','payments','cashLedger','bankTransactions','expenses','documents','settings']){
+   await assertFails(sdk.setDoc(sdk.doc(admin,`${c}/${collectionName}/forged`),forgedRecord));
+   await assertFails(sdk.setDoc(sdk.doc(staff,`${c}/${collectionName}/forged`),forgedRecord));
+ }
+ await assertFails(sdk.setDoc(sdk.doc(admin,`${c}/operations/forged`),forgedOperation));
+ await assertFails(sdk.setDoc(sdk.doc(staff,`${c}/auditLogs/forged`),{companyId:'tsukinowa',after:{amount:1}}));
+ await assertFails(sdk.setDoc(sdk.doc(forgedSandboxStaff,`${c}/operations/forged`),forgedOperation));
+ await assertFails(sdk.setDoc(sdk.doc(otherTenant,`${c}/payments/forged`),forgedRecord));
+ await assertFails(sdk.setDoc(sdk.doc(anon,`${c}/sales/forged`),forgedRecord));
+ await assertFails(sdk.deleteDoc(sdk.doc(admin,`${c}/payments/forged`)));
+ await assertFails(sdk.updateDoc(sdk.doc(admin,`${c}/payments/forged`),{revision:999,payload:{amount:0}}));
+});
