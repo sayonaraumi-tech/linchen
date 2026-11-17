@@ -263,6 +263,7 @@ async function boot() {
     if (user) connection.textContent = 'オフラインです。再接続するまで変更を保存できません。';
   });
   setInterval(() => { if (!document.hidden && !mfaPending) void refresh(); }, config.cloud ? 30000 : 5000);
+  signInForm.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled = false;
 }
 
 document.querySelector<HTMLSelectElement>('#theme')!.addEventListener('change', event => {
