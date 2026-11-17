@@ -6,8 +6,14 @@
 const B=globalThis.TsukinowaCoreBusiness;
 const Calendar=globalThis.TsukinowaScheduleCalendar;
 const Sandbox=globalThis.TsukinowaSandboxStorage;
-if(!B||!Calendar||!Sandbox)throw Error('Required domain runtime missing');
-const store=Sandbox.createSandboxStore({storage:localStorage,key:'linchen_independent_test_v1'});
+const acceptance=globalThis.LinchenAcceptance;
+const finance=globalThis.TsukinowaFinanceViews;
+const totals=globalThis.TsukinowaDocumentTotals;
+if(!B||!Calendar||(!Sandbox&&!acceptance))throw Error('Required domain runtime missing');
+const store=acceptance||Sandbox.createSandboxStore({storage:localStorage,key:'linchen_independent_test_v1'});
+const writable=()=>!acceptance||acceptance.canWrite();
+let onodaRequest=null;
+let reportingPeriod={};
 const root=document.getElementById('page'),status=document.getElementById('status');
 let current='home',editing={schedule:'',customer:'',expense:''},onodaDraft=null,documentFormDraft=null;
 const esc=x=>String(x??'').replace(/[&<>"']/g,k=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[k]));
@@ -15,16 +21,35 @@ const amount=x=>Number(x||0).toLocaleString('ja-JP')+' 円';
 const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const field=(name,label,type='text',value='',required=true)=>'<label>'+esc(label)+'<input name="'+esc(name)+'" type="'+esc(type)+'" value="'+esc(value)+'" '+(required?'required':'')+'></label>';
 const select=(name,label,options,chosen)=>'<label>'+esc(label)+'<select name="'+esc(name)+'">'+options.map(([v,t])=>'<option value="'+esc(v)+'"'+(chosen===v?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select></label>';
-function form(id,inputs,label){return '<form data-action="'+esc(id)+'">'+inputs+'<button type="submit">'+esc(label)+'</button></form>';}
+function form(id,inputs,label){if(!writable())return '';return '<form data-action="'+esc(id)+'">'+inputs+'<button type="submit">'+esc(label)+'</button></form>';}
 function grid(head,rows){return '<div class="table-scroller"><table><thead><tr>'+head.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';}
 const td=values=>'<tr>'+values.map(x=>'<td>'+esc(x)+'</td>').join('')+'</tr>';
-const button=(action,id,label)=>'<button type="button" data-action="'+esc(action)+'" data-id="'+esc(id)+'">'+esc(label)+'</button>';
+const readActions=new Set(['document-detail','document-pdf','document-search','workspace-reload']);
+const button=(action,id,label)=>(!writable()&&!readActions.has(action))||
+ (acceptance&&['deleteTestRecord','customer-delete','expense-delete'].includes(action))?'':'<button type="button" data-action="'+esc(action)+'" data-id="'+esc(id)+'">'+esc(label)+'</button>';
 function snapshot(){return store.snapshot()}
 function list(kind){return B.list(snapshot(),kind)}
 function notice(message,error=false){status.textContent=message;status.dataset.error=error?'true':'false'}
 function page(title,description,body){return '<h2>'+esc(title)+'</h2><p class="note">'+esc(description)+'</p>'+body;}
 function home(){
- const s=snapshot(),v=B.getOverview(s);
+ const s=snapshot();
+ if(acceptance){
+  const now=today(),year=Number(now.slice(0,4))-(Number(now.slice(5,7))<10?1:0);
+  if(!reportingPeriod.fiscalYear&&!reportingPeriod.month)reportingPeriod={fiscalYear:year};
+  const selectedMonth=reportingPeriod.month;
+  const selectedYear=reportingPeriod.fiscalYear||Number(selectedMonth.slice(0,4));
+  const previousPeriod=selectedMonth?{month:(selectedYear-1)+selectedMonth.slice(4)}:{fiscalYear:selectedYear-1};
+  const v=finance.dashboard(s,reportingPeriod),previous=finance.dashboard(s,previousPeriod);
+  const closingCash=period=>finance.cashRegister(s,{to:finance.period(period).to}).at(-1)?.runningBalance??0;
+  const staff=!writable();
+  const metrics=[['売上',v.sales,previous.sales],['確認済入金',v.receipts,previous.receipts],['未入金',v.outstanding,previous.outstanding]];
+  if(!staff)metrics.push(['支出',v.expenses,previous.expenses],['現金入',v.cashIncome,previous.cashIncome],
+   ['現金出',v.cashExpense,previous.cashExpense],['現金残高',closingCash(reportingPeriod),closingCash(previousPeriod)]);
+  return page('ホーム','会計年度 10月1日〜翌年9月30日',
+   '<div class="inline-actions">'+field('fiscalYear','年度','number',selectedYear)+field('reportMonth','対象月','month',reportingPeriod.month||'',false)+'</div>'+
+   grid(['集計','選択期間',selectedMonth?'前年同月':'前年度'],metrics.map(([name,value,prior])=>td([name,amount(value),amount(prior)]))));
+ }
+ const v=B.getOverview(s);
  const props=[['売上',v.sales],['確認済入金',v.confirmedPayments],['未入金',v.outstanding],['支出',v.expenses],['現金入',v.cashIn],['現金出',v.cashOut]];
  return page('HOME','テスト領域内の全期間集計。銀行・プラットフォーム明細の二重計上は行いません。','<div class="metrics">'+props.map(([k,n])=>'<div class="metric">'+esc(k)+'<b>'+esc(amount(n))+'</b></div>').join('')+'</div><h3>データ数</h3>'+grid(['種別','件数'],B.COLLECTIONS.filter(c=>c!=='auditLogs').map(c=>td([c,list(c).length]))));
 }
@@ -36,7 +61,7 @@ function schedule(){
   select('kind','区分',[['見積','見積'],['その他','その他'],['小野田','小野田']],edit?.kind)+
   '<label>小野田施工数量（m）<input name="onodaQuantity" type="number" min="0" step="0.01" value="'+esc(edit?.onodaQuantity??'')+'"></label>';
  const cells=monthView.cells.map(c=>'<div class="day'+(c.inMonth?'':' outside')+'" data-date="'+esc(c.date)+'"><b>'+esc(c.day)+'</b>'+c.events.map(e=>'<div class="event">'+esc(e.title)+'<small> '+esc(e.status)+'</small></div>').join('')+'</div>').join('');
- const rows=list('schedule').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.status!=='active'?button('schedule-restore',e.id,'復元'):(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録'))+' '+button('schedule-edit',e.id,'編集')+' '+(!e.registeredSaleId?button('schedule-void',e.id,'取消'):''))+'</td></tr>');
+ const rows=list('schedule').map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.title)+'</td><td>'+esc(e.customer||'')+'</td><td>'+esc(e.registeredSaleId?'売上登録済':'予定')+'</td><td>'+esc(e.googleEventId?'Google連携':'内部')+'</td><td>'+esc(e.id)+'</td><td>'+(e.status!=='active'?button('schedule-restore',e.id,'復元'):(e.registeredSaleId?'登録済':button('schedule-sale',e.id,'売上登録')+' '+(acceptance?button('schedule-cash',e.id,'現金施工を確定'):''))+' '+button('schedule-edit',e.id,'編集')+' '+(!e.registeredSaleId?button('schedule-void',e.id,'取消'):''))+'</td></tr>');
  return page('日程','内部日程が主データです。Google Calendar は不要で、無接続でも追加・表示できます。',
  '<label>対象月<input type="month" id="calendar-month" value="'+esc(month)+'"></label>'+button('onoda-import',month,'小野田明細読込 → 請求書')+'<div class="day-grid">'+cells+'</div>'+
  form('schedule',inputs,edit?'日程の変更を保存':'日程を保存')+grid(['日付','件名','取引先','状態','由来','ID','操作'],rows));
@@ -49,39 +74,45 @@ function documents(){
    '<p>'+esc(draft.customerName)+'　'+esc(draft.invoiceDate)+'</p>'+
    grid(['施工日','内容','数量（m）','単価','税区分','備考'],draft.items.map(row=>td([
     row.workDate,row.content,row.qty,amount(row.price),row.taxable?'課税':'非課税',row.memo,
-   ])))+button('onoda-close','','編集中の明細を閉じる'));
+   ])))+(acceptance?'<p>'+esc(formatTotals(draft))+'</p>'+
+      button('onoda-save','','小野田請求書を正式発行'):'')+button('onoda-close','','編集中の明細を閉じる'));
  }
  const draft=documentFormDraft||{};
- const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],['onoda','小野田']],draft.docType)+
+ const inputs=select('docType','帳票種別',[['estimate','見積書'],['invoice','請求書'],['receipt','領収書'],...(acceptance?[]:[['onoda','小野田']])],draft.docType)+
  field('customerName','宛名','text',draft.customerName??'')+field('invoiceDate','発行日','date',draft.invoiceDate??today())+
- field('amount','入力金額（見積・請求=税抜、領収=受領税込）','number',draft.amount??'10000')+
- field('description','工事内容','text',draft.description??'壁紙補修')+
- select('paymentMethod','受領方法',[['現金','現金'],['銀行振込','銀行振込']],draft.paymentMethod);
- return page('帳票','この画面は帳票レコードの保存動作を検証します。PDFの原版レイアウト・実際の印刷機能は別のPDFテストで検証します。',
+ field('amount','入力金額（見積・請求=税抜、領収=受領税込）','number',draft.amount??(acceptance?'':'10000'))+
+ field('description','工事内容','text',draft.description??(acceptance?'':'壁紙補修'))+
+ (acceptance?field('discount','請求書の値引き（円）','number',draft.discount??'',false):
+  select('paymentMethod','受領方法',[['現金','現金'],['銀行振込','銀行振込']],draft.paymentMethod));
+ return page('帳票',acceptance?'金額を入力して確定帳票を発行します。確定後のPDFは保存帳票で確認できます。':'この画面は帳票レコードの保存動作を検証します。PDFの原版レイアウト・実際の印刷機能は別のPDFテストで検証します。',
  form('document',inputs,'帳票を正式保存')+
  '<p class="note">見積書は売上を作成しません。独立した領収書は現金のみ登録できます。銀行振込の領収書は既存売上・入金との明示的な関連が必要です。</p>');
 }
-function history(){
- const docs=list('documents').sort((a,b)=>b.issueDate.localeCompare(a.issueDate));
+function history(estimates=false){
+ const search=acceptance?(document.querySelector('#document-search')?.value||'').trim():'';
+ const docs=list('documents').filter(d=>(!estimates||d.docType==='estimate')&&
+  (!search||[d.invoiceNo,d.customer,d.issueDate,d.amount].some(value=>String(value).includes(search)))).sort((a,b)=>b.issueDate.localeCompare(a.issueDate));
  const payments=list('payments'),allDocs=list('documents');
  const rows=docs.map(d=>{
   const linkedPayment=!!d.paymentId||payments.some(p=>p.status==='active'&&p.saleId===d.saleId&&d.saleId);
   const sharedSale=!!d.saleId&&allDocs.some(other=>other.id!==d.id&&other.saleId===d.saleId&&other.status==='active');
   const voidControl=d.status==='active'&&!linkedPayment&&!sharedSale?button('voidDocument',d.id,'無効化'):'原本保持・参照のみ';
   const actions=button('document-detail',d.id,'内容確認')+' '+button('document-pdf',d.id,'原版PDF')+' '
-    +(d.docType==='estimate'&&d.status==='active'?button('estimate-convert',d.id,'請求書に変換')+' ':'')
+    +(d.docType==='estimate'&&['active','accepted','accepted-undated'].includes(d.status)?button('estimate-convert',d.id,'請求書に変換')+' ':'')
+    +(estimates&&d.status==='active'?button('estimate-accept',d.id,'受注')+' ':'')
     +(d.status==='active'?button('document-revise',d.id,'訂正')+' ':'')
     +voidControl+' '+button('deleteTestRecord',d.id,'テスト削除');
   return '<tr><td>'+esc(d.invoiceNo)+'</td><td>'+esc(d.docType)+'</td><td>'+esc(d.customer)+'</td><td>'+esc(amount(d.amount))+'</td><td>'+esc(d.status)+'</td><td>'+esc(d.id)+'</td><td>'+actions+'</td></tr>';});
- return page('帳票履歴','確定帳票の番号と内容を保持。過去帳票の無効化は理由が必要です。',
- grid(['帳票番号','種別','宛名','金額','状態','ID','操作'],rows));
+ return page(estimates?'見積履歴':acceptance?'保存帳票':'帳票履歴','確定帳票の番号と内容を保持。過去帳票の無効化は理由が必要です。',
+ (acceptance?'<label>帳票番号・宛名・日付・金額<input id="document-search" value="'+esc(search)+'"></label>'+
+ button('document-search','','検索'):'')+grid(['帳票番号','種別','宛名','金額','状態','ID','操作'],rows));
 }
 function sales(){
  const s=list('sales').filter(x=>x.status==='active'),payments=list('payments');
  const input=select('saleId','売上',s.map(x=>[x.id,x.customer+' '+amount(x.amount)]))+
- field('amount','入金額','number','1000')+field('paymentDate','入金日','date',today())+
+ field('amount','入金額','number',acceptance?'':'1000')+field('paymentDate','入金日','date',today())+
  select('method','方法',[['現金','現金'],['銀行振込','銀行振込']]);
- const rows=s.map(x=>{const pay=payments.filter(p=>p.saleId===x.id&&p.status==='active'&&['cash-received','bank-confirmed'].includes(p.confirmation)).reduce((v,p)=>v+p.amount,0);
+ const rows=s.map(x=>{const pay=acceptance?x.amount-B.balance(snapshot(),x.id):payments.filter(p=>p.saleId===x.id&&p.status==='active'&&['cash-received','bank-confirmed'].includes(p.confirmation)).reduce((v,p)=>v+p.amount,0);
   return '<tr>'+[x.salesDate,x.customer,amount(x.amount),amount(pay),amount(x.amount-pay),x.id].map(v=>'<td>'+esc(v)+'</td>').join('')+'<td>'+payments.filter(p=>p.saleId===x.id&&p.status==='active').map(p=>'<div>'+esc(p.id)+' '+esc(amount(p.amount))+' '+esc(p.confirmation)+' '+(['cash-received','bank-confirmed'].includes(p.confirmation)?button('payment-receipt',p.id,'領収書発行'):'')+' '+(p.sourceDocumentId?'':button('payment-void',p.id,'入金取消'))+'</div>').join('')+'</td></tr>'});
  return page('売上・入金','売上と入金を別記録で管理。現金は現金台帳と連動し、銀行振込は照合前は未入金。',
  (s.length?form('payment',input,'入金登録'):'<p>まず請求書を作成してください。</p>')+
@@ -90,10 +121,11 @@ function sales(){
 function expenses(){
  const edit=list('expenses').find(x=>x.id===editing.expense&&x.status==='active');
  const input=field('expenseDate','支出日','date',edit?.expenseDate||today())+field('vendor','支払先','text',edit?.vendor||'')+
- field('category','勘定科目','text',edit?.category||'材料費')+field('amount','金額','number',edit?.amount||1000)+
- select('paymentMethod','支払方法',[['現金','現金'],['銀行振込','銀行振込'],['法人信用カード','法人信用カード']],edit?.paymentMethod);
+ field('category','勘定科目','text',edit?.category||'材料費')+field('amount','金額','number',edit?.amount||(acceptance?'':1000))+
+ select('paymentMethod','支払方法',[['現金','現金'],['銀行振込','銀行振込'],['法人信用カード','法人信用カード'],['代表者立替','代表者立替']],edit?.paymentMethod);
  const expenses=list('expenses');
- const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(e.status)+'</td><td>'+(e.status==='active'?button('expense-edit',e.id,'編集')+' '+button('expense-void',e.id,'取消'):button('expense-restore',e.id,'復元'))+' '+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
+ const expenseStatus=new Map(acceptance?finance.expensesRegister(snapshot()).map(x=>[x.id,x.paymentStatus]):[]);
+ const rows=expenses.map(e=>'<tr><td>'+esc(e.expenseDate)+'</td><td>'+esc(e.vendor)+'</td><td>'+esc(e.category)+'</td><td>'+esc(amount(e.amount))+'</td><td>'+esc(e.paymentMethod)+'</td><td>'+esc(acceptance&&e.status==='active'?expenseStatus.get(e.id):e.status)+'</td><td>'+(e.status==='active'?button('expense-edit',e.id,'編集')+' '+button('expense-void',e.id,'取消'):button('expense-restore',e.id,'復元'))+' '+button('expense-delete',e.id,'テスト削除')+'</td></tr>');
  const cash=list('cashLedger').filter(e=>!e.deletedAt);
  return page('支出・現金','現金支出は一件の現金台帳に鏡映。重複計上しません。',
  form('expense',input,edit?'支出を変更':'支出登録')+grid(['日付','支払先','科目','金額','方法','状態','操作'],rows)+
@@ -106,30 +138,34 @@ function bank(){
  const banks=list('bankTransactions');
  const rows=banks.map(x=>'<tr><td>'+esc(x.date)+'</td><td>'+esc(x.description)+'</td><td>'+esc(amount(x.amount))+'</td><td>'+esc(x.direction)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.id)+'</td><td>'+(x.status==='matched'?button('bank-unmatch',x.id,'照合解除'):button('bank-match',x.id,'候補を確認'))+'</td></tr>');
  return page('銀行照合','銀行明細は入出金の証拠。登録だけでは売上や支出を作りません。候補を確認し、明示的な承認があって初めて既存の入金・支出と照合します。',
- form('bank',input,'銀行明細のテスト登録')+grid(['日付','摘要','金額','入出金','状態','ID','操作'],rows));
+ (acceptance?form('bank-csv',field('account','口座')+
+  '<label>銀行CSV<input name="csv" type="file" accept=".csv,text/csv" required></label>','銀行CSVを取り込む'):
+  form('bank',input,'銀行明細のテスト登録'))+grid(['日付','摘要','金額','入出金','状態','ID','操作'],rows));
 }
 function settings(){
  const input=field('key','設定名','text','memo')+field('value','設定値','text','test');
  const edit=list('customers').find(x=>x.id===editing.customer&&x.status==='active');
  const customer=field('name','取引先名','text',edit?.name||'')+field('address','住所','text',edit?.address||'',false);
  const customers=list('customers');
- return page('設定','独立テストデータのみ。旧システムの設定値は取得・上書きしません。',
- form('setting',input,'設定を保存')+form('customer',customer,edit?'取引先を変更':'取引先を追加')+
+ return page('設定',acceptance?'取引先の管理':'独立テストデータのみ。旧システムの設定値は取得・上書きしません。',
+ (acceptance?'':form('setting',input,'設定を保存'))+form('customer',customer,edit?'取引先を変更':'取引先を追加')+
  grid(['名前','住所','ID','操作'],customers.map(x=>'<tr><td>'+esc(x.name)+'</td><td>'+esc(x.address)+'</td><td>'+esc(x.id)+'</td><td>'+(x.status==='active'?button('customer-edit',x.id,'編集')+' '+button('customer-void',x.id,'取消'):button('customer-restore',x.id,'復元'))+' '+button('customer-delete',x.id,'テスト削除')+'</td></tr>'))+
- '<button type="button" data-action="backup">テストデータのバックアップを保存</button>');
+ (acceptance?'':'<button type="button" data-action="backup">テストデータのバックアップを保存</button>'));
 }
-const views={home,schedule,documents,history,sales,expenses,bank,settings};
+const views={home,schedule,documents,history,estimates:()=>history(true),sales,expenses,bank,settings};
 function render(pageId=current){
+ if(acceptance&&!snapshot())return;
  if(!views[pageId])throw Error('Unknown view');
  current=pageId;root.innerHTML=views[pageId]();
  document.querySelectorAll('#nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.page===current?'page':'false'));
 }
 let serial=0;
-function operationId(){serial++;return 'browser_'+Date.now().toString(36)+'_'+serial+'_'+Math.random().toString(36).slice(2,12)}
+function operationId(){if(acceptance)return crypto.randomUUID();serial++;return 'browser_'+Date.now().toString(36)+'_'+serial+'_'+Math.random().toString(36).slice(2,12)}
 function val(data,key){return String(data.get(key)??'').trim()}
 async function submit(form){
  if(form.dataset.submitting==='true')return;
  form.dataset.submitting='true';
+ if(acceptance)notice('保存しています');
  if(!form.dataset.operationId)form.dataset.operationId=operationId();
  const submitButton=form.querySelector('button[type=submit]');
  if(submitButton)submitButton.disabled=true;
@@ -146,6 +182,11 @@ async function submit(form){
  case 'document':{
   const type=val(data,'docType'),amountValue=Number(val(data,'amount'));
   const customer=val(data,'customerName'),date=val(data,'invoiceDate'),description=val(data,'description');
+  if(acceptance){
+   command={type:'issueDocument',docType:type,customerName:customer,invoiceDate:date,description,
+    price:amountValue,discount:Number(val(data,'discount')||0)};
+   break;
+  }
   const gross=type==='receipt'?amountValue:amountValue+Math.round(amountValue*0.1);
   command={type:'issueDocument',docType:type,sourceKey:'test_'+(form.dataset.operationId||operationId()),amount:gross,
    snapshot:{customerName:customer,invoiceDate:date,items:[{content:description,qty:1,price:amountValue,taxable:true,unit:'式'}],
@@ -154,6 +195,13 @@ async function submit(form){
  }
  case 'payment':command={type:'registerPayment',saleId:val(data,'saleId'),amount:Number(val(data,'amount')),paymentDate:val(data,'paymentDate'),method:val(data,'method')};break;
  case 'expense':command={type:'saveExpense',id:editing.expense||undefined,expenseDate:val(data,'expenseDate'),vendor:val(data,'vendor'),category:val(data,'category'),amount:Number(val(data,'amount')),paymentMethod:val(data,'paymentMethod')};break;
+ case 'bank-csv':{
+  const file=data.get('csv');
+  if(!file?.size||file.size>6144)throw Error('6 KB以下の銀行CSVを指定してください');
+  const bytes=new Uint8Array(await file.arrayBuffer());
+  command={type:'importBankCSV',account:val(data,'account'),filename:file.name,
+   base64:btoa(String.fromCharCode(...bytes))};break;
+ }
  case 'bank':command={type:'importBankTransaction',account:val(data,'account'),externalId:val(data,'externalId'),date:val(data,'date'),description:val(data,'description'),amount:Number(val(data,'amount')),direction:val(data,'direction')};break;
  case 'setting':command={type:'saveSettings',key:val(data,'key'),value:val(data,'value')};break;
  case 'customer':command={type:'saveCustomer',id:editing.customer||undefined,name:val(data,'name'),address:val(data,'address')};break;
@@ -161,7 +209,7 @@ async function submit(form){
  }
  await store.perform({...command,operationId:form.dataset.operationId});
  if(action==='document')documentFormDraft=null;
- notice('テスト領域に保存しました：'+action);
+ notice(acceptance?'保存しました':'テスト領域に保存しました：'+action);
  if(action in editing)editing[action]='';
  render(current);
  }finally{
@@ -171,6 +219,24 @@ async function submit(form){
 }
 async function clickAction(btn){
  const action=btn.dataset.action,id=btn.dataset.id;
+ if(action==='workspace-reload'){await acceptance.refresh();render();return;}
+ if(action==='document-search'){render();return;}
+ if(action==='estimate-accept'){
+  const workDate=prompt('施工日（YYYY-MM-DD）',today());
+  if(!workDate)return;
+  await store.perform({type:'acceptEstimate',estimateId:id,workDate,operationId:operationId()});
+  notice('受注を登録しました');render();return;
+ }
+ if(action==='onoda-save'){
+  btn.disabled=true;
+  notice('保存しています');
+  try{
+   await store.perform(onodaRequest);
+   onodaDraft=null;onodaRequest=null;
+   render('history');notice('小野田請求書を発行しました');
+  }finally{btn.disabled=false;}
+  return;
+ }
  if(action==='backup'){
   const blob=new Blob([store.exportBackup()],{type:'application/json'});
   const url=URL.createObjectURL(blob),a=document.createElement('a');
@@ -180,7 +246,7 @@ async function clickAction(btn){
  if(['schedule-edit','expense-edit','customer-edit'].includes(action)){
   const key=action.slice(0,-5),collection={schedule:'schedule',expense:'expenses',customer:'customers'}[key];
   if(!list(collection).some(x=>x.id===id&&x.status==='active'))throw Error('有効な編集対象がありません');
-  editing[key]=id;render(current);notice('編集対象を選択しました');return;
+  editing[key]=id;render(current);if(acceptance)acceptance.markEditing();notice('編集対象を選択しました');return;
  }
  if(['schedule-void','expense-void','customer-void'].includes(action)){
   const reason=prompt('取消理由を入力してください');
@@ -193,7 +259,7 @@ async function clickAction(btn){
   if(!doc)throw Error('保存済帳票が見つかりません');
   const before=JSON.stringify(snapshot());
   notice('原版PDFを出力しています');
-  const response=await fetch('/api/test-pdf',{method:'POST',headers:{'Content-Type':'application/json'},
+  const response=acceptance?await acceptance.pdf(id):await fetch('/api/test-pdf',{method:'POST',headers:{'Content-Type':'application/json'},
    body:JSON.stringify({document:doc})});
   if(!response.ok){
    const err=await response.json().catch(()=>({error:'PDF出力に失敗'}));
@@ -203,7 +269,17 @@ async function clickAction(btn){
   if(blob.type!=='application/pdf'||blob.size<100)throw Error('PDFが不正です');
   const filename=decodeURIComponent(response.headers.get('X-Document-Filename')||'formal.pdf');
   const url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download=filename;a.click();
+  a.href=url;a.download=filename;
+  if(acceptance){
+   a.textContent='PDFをダウンロード';
+   const dialog=document.createElement('dialog'), frame=document.createElement('iframe'), close=document.createElement('button');
+   frame.src=url;frame.title='確定帳票PDF';frame.className='pdf-preview';
+   close.textContent='閉じる';close.addEventListener('click',()=>dialog.close());
+   dialog.addEventListener('close',()=>{URL.revokeObjectURL(url);dialog.remove();});
+   dialog.append(frame,a,close);document.body.append(dialog);dialog.showModal();
+   notice('PDFを表示しました');return;
+  }
+  a.click();
   setTimeout(()=>URL.revokeObjectURL(url),0);
   if(JSON.stringify(snapshot())!==before)throw Error('PDF再ダウンロード中の会計データ変更');
   notice('原版PDFをダウンロードしました（データ変更なし）');return;
@@ -225,11 +301,17 @@ async function clickAction(btn){
    event.preventDefault();
    const data=new FormData(event.currentTarget),tax=val(data,'taxable');
    try{
-    const draft=Calendar.draftOnodaInvoice(snapshot(),{month:id,selectedIds:data.getAll('selected'),
+    const request={month:id,selectedIds:data.getAll('selected'),
      invoiceDate:val(data,'invoiceDate'),billing:{customerName:val(data,'customerName'),
-      unitPrice:Number(val(data,'unitPrice')),taxable:tax?tax==='taxable':undefined}});
+      unitPrice:Number(val(data,'unitPrice')),taxable:tax?tax==='taxable':undefined}};
+    const draft=Calendar.draftOnodaInvoice(snapshot(),request);
+    if(acceptance)formatTotals(draft);
     if((onodaDraft||documentFormDraft)&&!confirm('現在編集中の帳票を置き換えますか？'))return;
     onodaDraft=draft;
+    if(acceptance){
+     onodaRequest={...request,type:'issueOnoda',operationId:operationId()};
+     acceptance.markEditing();
+    }
     documentFormDraft=null;
     dialog.close();
     render('documents');
@@ -289,18 +371,22 @@ async function clickAction(btn){
   if(customer===null)return;
   const corrected=JSON.parse(JSON.stringify(doc.snapshot));corrected.customerName=customer;
   corrected.invoiceDate=today();
+  if(acceptance){
+   await store.perform({type:'reviseDocument',operationId:operationId(),documentId:id,reason,customerName:customer});
+   notice('訂正版を発行しました');render();return;
+  }
   await store.perform({type:'reviseDocument',operationId:operationId(),documentId:id,reason,
     amount:doc.amount,newSnapshot:corrected});
   notice('原本を保持したまま訂正版を発行しました');render();return;
  }
- if(action==='schedule-sale'){
+ if(action==='schedule-sale'||action==='schedule-cash'){
   const amountText=prompt('工事売上の税込金額（円）');
   if(amountText===null)return;
   if(!/^\d+$/.test(amountText.trim()))throw Error('税込金額は円単位の正数で指定してください');
   const ev=list('schedule').find(x=>x.id===id);
   if(!ev)throw Error('予定が見つかりません');
-  await store.perform({type:'registerScheduleSale',operationId:operationId(),scheduleId:id,amount:Number(amountText),salesDate:ev.date});
-  notice('同じ日程に売上を関連付けました');render();return;
+  await store.perform({type:'registerScheduleSale',operationId:operationId(),scheduleId:id,amount:Number(amountText),salesDate:ev.date,...(action==='schedule-cash'?{cash:true}:{})});
+  notice(action==='schedule-cash'?'売上と現金入金を確定しました':'同じ日程に売上を関連付けました');render();return;
  }
  if(action==='bank-match'){
   const bank=list('bankTransactions').find(x=>x.id===id);
@@ -337,7 +423,7 @@ async function clickAction(btn){
 }
 document.addEventListener('click',async e=>{
  const btn=e.target.closest('button');if(!btn)return;
- try{if(btn.dataset.page){render(btn.dataset.page);notice('');}
+ try{if(btn.dataset.page){render(btn.dataset.page);notice('');if(acceptance&&!onodaDraft)await acceptance.refresh();}
  else if(btn.dataset.action){await clickAction(btn);}}
  catch(error){notice(error.message,true);}
 });
@@ -348,10 +434,26 @@ document.addEventListener('submit',async e=>{
 });
 document.addEventListener('change',e=>{
  if(e.target.id==='calendar-month')render('schedule');
+ if(e.target.name==='fiscalYear'&&e.target.value){
+  reportingPeriod={fiscalYear:Number(e.target.value)};render('home');
+ }
+ if(e.target.name==='reportMonth'&&e.target.value){
+  reportingPeriod={month:e.target.value};render('home');
+ }
 });
 document.addEventListener('input',e=>{
+ if(acceptance&&e.target.closest('form[data-action]'))acceptance.markEditing();
  const form=e.target.closest('form[data-action="document"]');
  if(form)documentFormDraft=Object.fromEntries(new FormData(form));
 });
-render('home');
+function formatTotals(draft){
+ const values=totals.documentTotals(draft);
+ return '税抜 '+amount(values.subtotal)+' ／ 消費税 '+amount(values.tax)+' ／ 合計 '+amount(values.total);
+}
+if(acceptance){
+ document.addEventListener('linchen-refresh',()=>render());
+ document.addEventListener('linchen-clear',()=>{
+  current='home';editing={schedule:'',customer:'',expense:''};onodaDraft=null;onodaRequest=null;documentFormDraft=null;
+ });
+}else render('home');
 })();

@@ -193,6 +193,12 @@ test('trusted API verifies Firebase identity, roles, tenant, freshness and optim
  }
  const handler=createCommandHandler({app:adminApp,companyId:'api-isolated'});
  const admin=await login('admin'),otherAdmin=await login('admin');
+ const mfaProtected=createCommandHandler({app:adminApp,companyId:'api-isolated',requireAdminMfa:true});
+ const withoutMfa=await mfaProtected(new Request('http://localhost/api/workspace',{
+  headers:{Authorization:'Bearer '+admin.token}
+ }));
+ assert.equal(withoutMfa.status,403);
+ assert.equal((await withoutMfa.json()).error,'mfa_required');
  const staff=await login('staff'),foreign=await login('admin','other'),sandbox=await login('admin','api-isolated',true);
  const call=(token,command)=>handler(new Request('http://localhost/api/commands',{
   method:command?'POST':'GET',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},

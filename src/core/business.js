@@ -170,9 +170,20 @@ function operate(s,cmd){
   a=write(s,'schedule',{...old,...onodaFields,id,date:date(c.date,'施工日'),title:text(c.title,'予定名'),customer:c.customer===undefined?old?.customer||'':String(c.customer),description:c.description===undefined?old?.description||'':String(c.description),projectId:String(c.projectId||old?.projectId||''),calendarId:String(c.calendarId||old?.calendarId||''),googleEventId:String(c.googleEventId||old?.googleEventId||''),googleUpdatedAt:c.googleUpdatedAt||old?.googleUpdatedAt||'',googleStatus:c.googleStatus||old?.googleStatus||'confirmed',start:c.start||old?.start||'',end:c.end||old?.end||'',location:c.location===undefined?old?.location||'':String(c.location),registeredSaleId:old?.registeredSaleId||'',status:'active'});break;}
  case 'registerScheduleSale':{
   const ev=requireRow(s,'schedule',c.scheduleId);
-  if(ev.registeredSaleId){a=requireRow(s,'sales',ev.registeredSaleId);break;}
-  a=registerSale(s,'schedule:'+ev.id,{customer:ev.customer||ev.title,amount:c.amount,salesDate:c.salesDate||ev.date,description:ev.description,scheduleId:ev.id});
-  ev.registeredSaleId=a.id;break;}
+  a=ev.registeredSaleId?requireRow(s,'sales',ev.registeredSaleId):
+   registerSale(s,'schedule:'+ev.id,{customer:ev.customer||ev.title,amount:c.amount,salesDate:c.salesDate||ev.date,description:ev.description,scheduleId:ev.id});
+  ev.registeredSaleId=a.id;
+  if(c.cash===true){
+   if(a.amount!==c.amount)throw Error('登録済みの売上金額が一致しません');
+   const confirmed=rows(s,'payments').find(p=>active(p)&&p.cashScheduleId===ev.id);
+   if(confirmed){
+    if(confirmed.saleId!==a.id||confirmed.paymentDate!==c.salesDate)throw Error('確定済みの現金入金と一致しません');
+   }else{
+    const cash=payment(s,{saleId:a.id,amount:a.amount,method:'現金',paymentDate:c.salesDate||ev.date});
+    cash.cashScheduleId=ev.id;
+   }
+  }
+  break;}
  case 'acceptEstimate':{
   const estimate=requireRow(s,'documents',c.estimateId);
   if(estimate.docType!=='estimate'||!['active','accepted','accepted-undated'].includes(estimate.status))throw Error('受注できる見積書を選択してください');
@@ -371,6 +382,19 @@ function operate(s,cmd){
   if(!category)throw Error('科目を選択してください。分類ルールがない取引先です');
   a=write(s,'expenses',{...old,id,expenseDate:date(c.expenseDate,'支出日'),vendor,description:String(c.description||''),category,amount,paymentMethod:text(c.paymentMethod,'支払方法'),bankTxnId:'',status:'active'});
   mirrorCash(s,'expenses',a);break;}
+ case 'importBankCSV':{
+  const existing=row(s,'settings',c.evidenceId);
+  if(existing){a={id:existing.id,imported:0,duplicates:c.duplicates};break;}
+  const transactions=c.entries.map(entry=>operate(s,{
+   type:'importBankTransaction',account:entry.account,externalId:entry.identity,
+   date:entry.date,description:entry.description,amount:entry.amount,direction:entry.direction,
+   balance:entry.balance,memo:entry.memo,occurrence:entry.occurrence,confidence:entry.confidence,
+   rawDescription:entry.rawDescription,
+  }).transaction);
+  write(s,'settings',{id:c.evidenceId, type:'bankCSV', sha256:c.digest, data:c.base64,
+   filename:c.filename,account:c.account,transactionIds:transactions.map(transaction=>transaction.id),status:'active'});
+  a={id:c.evidenceId,imported:transactions.length,duplicates:c.duplicates};
+  break;}
  case 'importBankTransaction':{
   const account=text(c.account,'銀行口座'),externalId=text(c.externalId,'銀行明細識別子');
   const match=rows(s,'bankTransactions').find(b=>b.account===account&&b.externalId===externalId);
